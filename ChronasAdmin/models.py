@@ -57,3 +57,11 @@ class OrderItem(models.Model):
 
     def get_total_price(self):
         return self.quantity * self.price
+
+class Coupon(models.Model):
+    code = models.CharField(max_length=10, unique=True)
+    discount = models.DecimalField(max_digits=5, decimal_places=2)
+    expiration_date = models.DateField()
+
+    def __str__(self):
+        return self.code
