@@ -26,4 +26,6 @@ urlpatterns = [
     path('update_coupon/<int:coupon_id>/', views.update_coupon, name='update_coupon'),
     path('delete_coupon/<int:coupon_id>/', views.delete_coupon, name='delete_coupon'),
 
+    path("stripe/webhook/", views.stripe_webhook, name='stripe_webhook'),
+
 ]
