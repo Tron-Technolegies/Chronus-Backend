@@ -30,10 +30,17 @@ SECRET_KEY = 'django-insecure-uro)q)gw-18yxkr80k!b63kd+n9c=8uo_m0)xj0*vhx=dp2k#e
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']
-
+ALLOWED_HOSTS = [
+    ".chronosgallery.com",   
+    "localhost",
+    "127.0.0.1",
+]
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
+    "http://localhost:5174",
+    "https://chronosgallery.com",
+    "https://www.chronosgallery.com",
+    "https://api.chronosgallery.com",
 ]
 
 # Application definition
@@ -47,7 +54,9 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'ChronasAdmin',
-    'ChronusUser'
+    'ChronusUser',
+    'cloudinary',
+    'cloudinary_storage',
 ]
 
 MIDDLEWARE = [
@@ -80,7 +89,14 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'ProjectChronas.wsgi.application'
 
+import os
+import cloudinary
 
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET")
+)
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
@@ -89,7 +105,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': "chronas_db",
         'USER': "postgres",
-        'PASSWORD': "admin",
+        'PASSWORD': "2003",
         'HOST': "localhost",
         'PORT': "5432"
     }
@@ -136,7 +152,7 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
+DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET=env("STRIPE_WEBHOOK_SECRET")
 

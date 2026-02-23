@@ -7,9 +7,9 @@ from django.db.models import Q
 import json
 from django.http import HttpResponse
 from datetime import datetime
+import cloudinary.uploader
 
-
-from .models import Category, Brand, Product, Order, Coupon
+from .models import Category, Brand, Product, Order, Coupon, ProductImage
 
 # Create your views here.
 
@@ -234,7 +234,6 @@ def delete_brand(request, brand_id):
 @require_http_methods(["POST"])
 def add_products(request):
     try:
-        # ✅ Handle FormData correctly
         name = request.POST.get("name")
         category_id = request.POST.get("category")
         brand_id = request.POST.get("brand")
@@ -243,14 +242,12 @@ def add_products(request):
         stock = request.POST.get("stock")
         image = request.FILES.get("image")
 
-        # ✅ Basic validation
         if not name:
             return JsonResponse({"error": "Product name is required"}, status=400)
 
         if not price:
             return JsonResponse({"error": "Price is required"}, status=400)
 
-        # ✅ Convert Foreign Keys properly
         category = None
         if category_id:
             category = Category.objects.filter(id=category_id).first()
@@ -262,8 +259,10 @@ def add_products(request):
             brand = Brand.objects.filter(id=brand_id).first()
             if not brand:
                 return JsonResponse({"error": "Invalid brand"}, status=400)
+            
+        is_featured = request.POST.get("is_featured") == "true"
+        is_best_seller = request.POST.get("is_best_seller") == "true"
 
-        # ✅ Create product
         product = Product.objects.create(
             name=name,
             category=category,
@@ -271,8 +270,18 @@ def add_products(request):
             price=price,
             description=description,
             stock=stock,
-            image=image
+            image=image,
+            is_featured=is_featured,
+            is_best_seller=is_best_seller
         )
+
+        gallery_images = request.FILES.getlist("images")
+
+        for img in gallery_images:
+            ProductImage.objects.create(
+                product=product,
+                image=img
+            )
 
         return JsonResponse({
             "id": product.id,
@@ -315,6 +324,11 @@ def view_products(request):
             "stock": product.stock,
             "image": product.image.url if product.image else None,
             "created_at": product.created_at,
+            "gallery": [
+            img.image.url for img in product.gallery.all()
+            ],
+            "is_featured": product.is_featured,
+            "is_best_seller": product.is_best_seller
         }
         for product in products
     ]
@@ -360,9 +374,25 @@ def update_product(request, product_id):
             product.stock = stock
 
         if image:
+            if product.image:
+                cloudinary.uploader.destroy(product.image.public_id)
+
             product.image = image
 
         product.save()
+
+        gallery_images = request.FILES.getlist("images")
+
+        if gallery_images:
+            # delete old gallery files from cloudinary
+            for img in product.gallery.all():
+                cloudinary.uploader.destroy(img.image.public_id)
+
+            product.gallery.all().delete()
+
+            # add new
+            for img in gallery_images:
+                ProductImage.objects.create(product=product, image=img)
 
         return JsonResponse({
             "message": "Product updated successfully",
@@ -381,6 +411,14 @@ def update_product(request, product_id):
 def delete_product(request, product_id):
     try:
         product = Product.objects.get(id=product_id)
+
+        if product.image and getattr(product.image, "public_id", None):
+            cloudinary.uploader.destroy(product.image.public_id)
+
+        for img in product.gallery.all():
+            if img.image and getattr(img.image, "public_id", None):
+                cloudinary.uploader.destroy(img.image.public_id)
+
         product.delete()
 
         return JsonResponse({"message": "Product deleted successfully"}, status=200)
@@ -389,43 +427,62 @@ def delete_product(request, product_id):
         return JsonResponse({"error": "Product not found"}, status=404)
     
 
-@csrf_exempt
 @require_http_methods(["GET"])
 def view_orders(request):
-    orders = Order.objects.all()
+    orders = Order.objects.prefetch_related("items", "user").all()
 
-    data = [
-        {
+    data = []
+
+    for order in orders:
+        data.append({
             "id": order.id,
-            "user": order.user,
-            "product": order.product,
-            "quantity": order.quantity,
-            "created_at": order.created_at
-        }
-        for order in orders
-    ]
+            "user": order.user.username if order.user else "Guest",
+            "email": order.email,
+            "phone": order.phone,
+            "status": order.status,
+            "tracking_link": order.tracking_link,
+            "shipped_at": order.shipped_at,
+            "total_amount": str(order.total_amount),
+            "created_at": order.created_at,
+        })
 
     return JsonResponse({"orders": data}, status=200)
 
-@csrf_exempt
+from django.utils import timezone
+
 @require_http_methods(["POST"])
 def update_order_status(request, order_id):
     try:
         data = json.loads(request.body)
-        status = data.get("status")
 
         order = Order.objects.get(id=order_id)
-        order.status = status
+
+        status = data.get("status")
+        tracking_link = data.get("tracking_link")
+
+        if status:
+            order.status = status
+
+        # If marked as shipped
+        if status == "shipped":
+            order.tracking_link = tracking_link
+            order.shipped_at = timezone.now()
+
         order.save()
 
-        return JsonResponse({"message": "Order status updated successfully"}, status=200)
+        return JsonResponse({
+            "message": "Order updated successfully",
+            "id": order.id,
+            "status": order.status,
+            "tracking_link": order.tracking_link
+        })
 
     except Order.DoesNotExist:
         return JsonResponse({"error": "Order not found"}, status=404)
 
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON format"}, status=400)
-    
+  
 
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -550,3 +607,140 @@ def stripe_webhook(request):
 
     print("Stripe Event:", event["type"])
     return HttpResponse(status=200)
+
+
+from django.http import JsonResponse
+from django.views.decorators.http import require_http_methods
+from django.db.models import Sum, Avg, Count
+from django.utils import timezone
+from datetime import timedelta
+from collections import defaultdict
+from .models import Order, OrderItem, Product
+
+
+@require_http_methods(["GET"])
+def dashboard_stats(request):
+
+    now = timezone.now()
+    today = now.date()
+    last_30_days = now - timedelta(days=30)
+    previous_30_days = now - timedelta(days=60)
+
+    # BASIC COUNTS
+
+    total_orders = Order.objects.count()
+
+    completed_orders = Order.objects.filter(status="completed").count()
+    pending_orders = Order.objects.filter(status="pending").count()
+    shipped_orders = Order.objects.filter(status="shipped").count()
+
+    # REVENUE
+
+    total_revenue = Order.objects.filter(
+        status="completed"
+    ).aggregate(
+        total=Sum("total_amount")
+    )["total"] or 0
+
+    revenue_last_30_days = Order.objects.filter(
+        status="completed",
+        created_at__gte=last_30_days
+    ).aggregate(
+        total=Sum("total_amount")
+    )["total"] or 0
+
+    revenue_previous_30_days = Order.objects.filter(
+        status="completed",
+        created_at__gte=previous_30_days,
+        created_at__lt=last_30_days
+    ).aggregate(
+        total=Sum("total_amount")
+    )["total"] or 0
+
+    growth_rate = 0
+    if revenue_previous_30_days > 0:
+        growth_rate = (
+            (revenue_last_30_days - revenue_previous_30_days)
+            / revenue_previous_30_days
+        ) * 100
+
+    # TODAY ORDERS
+    today_orders = Order.objects.filter(
+        created_at__date=today
+    ).count()
+
+    # AVERAGE ORDER VALUE
+    avg_order_value = Order.objects.filter(
+        status="completed"
+    ).aggregate(
+        avg=Avg("total_amount")
+    )["avg"] or 0
+
+    # LOW STOCK PRODUCTS
+
+    low_stock_products = Product.objects.filter(
+        stock__lt=5
+    ).count()
+
+    # MONTHLY SALES (Last 6 Months)
+
+    monthly_sales = defaultdict(float)
+
+    six_months_ago = now - timedelta(days=180)
+
+    orders = Order.objects.filter(
+        status="completed",
+        created_at__gte=six_months_ago
+    )
+
+    for order in orders:
+        month_label = order.created_at.strftime("%b")
+        monthly_sales[month_label] += float(order.total_amount)
+
+    monthly_sales_data = [
+        {"month": k, "revenue": v}
+        for k, v in monthly_sales.items()
+    ]
+
+    # REVENUE BY CATEGORY
+
+    category_revenue = defaultdict(float)
+
+    items = OrderItem.objects.filter(
+        order__status="completed"
+    ).select_related("product")
+
+    for item in items:
+        category_name = item.product.category.name if item.product and item.product.category else "Unknown"
+        category_revenue[category_name] += float(item.get_total_price())
+
+    category_revenue_data = [
+        {"category": k, "revenue": v}
+        for k, v in category_revenue.items()
+    ]
+
+    # TOP SELLING PRODUCTS
+    top_products = (
+        OrderItem.objects
+        .values("product_name")
+        .annotate(total_sold=Sum("quantity"))
+        .order_by("-total_sold")[:5]
+    )
+
+
+    return JsonResponse({
+        "cards": {
+            "total_revenue": total_revenue,
+            "total_orders": total_orders,
+            "completed_orders": completed_orders,
+            "pending_orders": pending_orders,
+            "shipped_orders": shipped_orders,
+            "today_orders": today_orders,
+            "avg_order_value": avg_order_value,
+            "low_stock_products": low_stock_products,
+            "growth_rate": round(growth_rate, 2),
+        },
+        "monthly_sales": monthly_sales_data,
+        "category_revenue": category_revenue_data,
+        "top_products": list(top_products),
+    })
