@@ -34,6 +34,7 @@ ALLOWED_HOSTS = [
     ".chronosgallery.com",   
     "localhost",
     "127.0.0.1",
+    'chronosgalleriesadmin.netlify.app'
 ]
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
