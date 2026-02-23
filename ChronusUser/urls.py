@@ -19,6 +19,9 @@ urlpatterns = [
     # -------- Checkout & Orders --------
     path('checkout/', views.checkout, name='checkout'),
     path('orders/', views.my_orders, name='my_orders'),
-    path("payments/create-intent/", views.CreatePaymentIntentView.as_view(), name="create-payment-intent")
+    path("payments/create-intent/", views.CreatePaymentIntentView.as_view(), name="create-payment-intent"),
+
+    path("signup/", views.signup, name='signup'),
+    path("login/", views.login, name='login'),
 
 ]

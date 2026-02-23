@@ -43,7 +43,8 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'ChronasAdmin',
-    'ChronusUser'
+    'ChronusUser',
+    "rest_framework"
 ]
 
 MIDDLEWARE = [
@@ -85,12 +86,24 @@ DATABASES = {
         'NAME': 'postgres',
         'USER': 'postgres',
         'PASSWORD':'DBadminchronas',
-        'HOST': 'database-1.cbs0uuisiwda.me-central-1.rds.amazonaws.com',
+        'HOST': 'database-1.cbs0uuiswda.me-central-1.rds.amazonaws.com',
         'PORT': '5432',
     }
 }
 
+from datetime import timedelta
 
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(days=1),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "AUTH_HEADER_TYPES": ("Bearer",),
+}
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
