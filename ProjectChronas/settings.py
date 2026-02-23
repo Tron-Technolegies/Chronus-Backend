@@ -30,12 +30,23 @@ SECRET_KEY = 'django-insecure-uro)q)gw-18yxkr80k!b63kd+n9c=8uo_m0)xj0*vhx=dp2k#e
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['3.28.58.78']
-
+ALLOWED_HOSTS = [
+    ".chronosgallery.com",   
+    "localhost",
+    "127.0.0.1",
+]
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "https://chronosgallery.com",
+    "https://www.chronosgallery.com",
+    "https://api.chronosgallery.com",
+]
 
 # Application definition
 
 INSTALLED_APPS = [
+    'corsheaders',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -44,10 +55,13 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'ChronasAdmin',
     'ChronusUser',
-    "rest_framework"
+    'cloudinary',
+    'cloudinary_storage',
+    'rest_framework'
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -76,7 +90,14 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'ProjectChronas.wsgi.application'
 
+import os
+import cloudinary
 
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET")
+)
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
@@ -145,7 +166,7 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
+DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET=env("STRIPE_WEBHOOK_SECRET")
 
