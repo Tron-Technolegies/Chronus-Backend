@@ -103,13 +103,14 @@ cloudinary.config(
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': "chronas_db",
-        'USER': "postgres",
-        'PASSWORD': "2003",
-        'HOST': "localhost",
-        'PORT': "5432"
+        'NAME': 'postgres',
+        'USER': 'postgres',
+        'PASSWORD':'DBadminchronas',
+        'HOST': 'database-1.cbs0uuisiwda.me-central-1.rds.amazonaws.com',
+        'PORT': '5432',
     }
 }
+
 
 
 # Password validation

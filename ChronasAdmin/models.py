@@ -55,9 +55,10 @@ class Order(models.Model):
     user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
     guest_id = models.CharField(max_length=100, null=True, blank=True)
 
-    email = models.EmailField(null=True, blank=True)
-    phone = models.CharField(max_length=20, null=True, blank=True)
-    shipping_address = models.TextField(null=True, blank=True)
+    # Customer info (even for logged in users)
+    email = models.EmailField(default="test@example.com")
+    phone = models.CharField(max_length=20, default='null')
+    shipping_address = models.TextField(default='null')
 
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     payment_status = models.CharField(max_length=20, default="pending")
