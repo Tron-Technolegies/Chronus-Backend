@@ -2,7 +2,11 @@ name: Deploy Chronus Backend
 
 on:
   push:
+<<<<<<< HEAD
     branches: ["main"]
+=======
+    branches: [ "main" ]
+>>>>>>> 8064850f2cf684dad413d46287a281d198d0f2a1
 
 jobs:
   deploy:
