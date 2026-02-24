@@ -34,7 +34,7 @@ ALLOWED_HOSTS = [
     ".chronosgallery.com",   
     "localhost",
     "127.0.0.1",
-    "https://api.chronosgallery.com",
+    "api.chronosgallery.com",
     '3.28.58.78'
 ]
 CORS_ALLOWED_ORIGINS = [
