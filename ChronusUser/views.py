@@ -23,10 +23,15 @@ def get_cart(request):
     if request.user.is_authenticated:
         cart, _ = Cart.objects.get_or_create(user=request.user)
     else:
-        guest_id = request.headers.get("guest_id")
+        guest_id = (
+            request.headers.get("x-guest-id")
+            or request.META.get("HTTP_X_GUEST_ID")
+        )
         if not guest_id:
             raise Exception("guest_id header required for guest user")
+
         cart, _ = Cart.objects.get_or_create(guest_id=guest_id)
+
     return cart
 
 
