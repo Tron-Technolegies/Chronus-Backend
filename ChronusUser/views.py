@@ -1,11 +1,12 @@
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
-from ChronasAdmin.models import Product, Order, OrderItem
+from ChronasAdmin.models import Coupon, Product, Order, OrderItem, SubCategory
 from .models import GuestSession, Cart, CartItem, Wishlist, Review
-
+from .models import Category, Brand, Product, Order, Coupon, SubCategory
 # ===============================
 # GUEST SESSION
 # ===============================
@@ -203,7 +204,7 @@ def my_orders(request):
 # ===============================
 import stripe
 from django.conf import settings
-from rest_framework.views import APIView
+from rest_framework.views import APIView, csrf_exempt
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -313,3 +314,114 @@ def login(request):
         "full_name": full_name,
         "tokens": tokens
     })
+
+
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def view_products(request):
+    products = Product.objects.all()
+
+    data = [
+        {
+            "id": product.id,
+            "name": product.name,
+            "category": {
+                "id": product.category.id,
+                "name": product.category.name
+            } if product.category else None,
+            "brand": {
+                "id": product.brand.id,
+                "name": product.brand.name
+            } if product.brand else None,
+            "price": str(product.price),
+            "description": product.description,
+            "stock": product.stock,
+            "image": product.image.url if product.image else None,
+            "created_at": product.created_at,
+            "gallery": [
+            img.image.url for img in product.gallery.all()
+            ],
+            "is_featured": product.is_featured,
+            "is_best_seller": product.is_best_seller
+        }
+        for product in products
+    ]
+
+    return JsonResponse({"products": data}, status=200)
+
+
+from django.views.decorators.http import require_http_methods
+@csrf_exempt
+@require_http_methods(["GET"])
+def view_coupons(request):
+    coupons = Coupon.objects.all()
+
+    data = [
+        {
+            "id": coupon.id,
+            "code": coupon.code,
+            "discount": coupon.discount,
+            "expiration_date": coupon.expiration_date,
+            "created_at": coupon.created_at,
+        }
+        for coupon in coupons
+    ]
+
+    return JsonResponse({"coupons": data}, status=200)
+
+
+def list_subcategories(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "GET required"}, status=405)
+
+    subs = SubCategory.objects.all().order_by("name")
+
+    data = [
+        {"id": s.id, "name": s.name}
+        for s in subs
+    ]
+
+    return JsonResponse(data, safe=False)
+
+
+@require_http_methods(["GET"])
+def view_brands(request):
+    search = request.GET.get("search", "")
+
+    brands = Brand.objects.filter(
+        Q(name__icontains=search)
+    ).order_by("-id")
+
+    data = [
+        {
+            "id": brand.id,
+            "name": brand.name,
+            "created_at": brand.created_at
+        }
+        for brand in brands
+    ]
+
+    return JsonResponse({"brands": data}, status=200)
+
+
+@require_http_methods(["GET"])
+def view_categories(request):
+    search = request.GET.get("search", "")
+
+    categories = Category.objects.filter(
+        Q(name__icontains=search)
+    ).order_by("-id")
+
+    data = [
+        {
+            "id": category.id,
+            "name": category.name,
+            "created_at": category.created_at
+        }
+        for category in categories
+    ]
+
+    return JsonResponse({"categories": data}, status=200)
+

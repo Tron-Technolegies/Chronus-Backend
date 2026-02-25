@@ -28,4 +28,10 @@ urlpatterns = [
 
     path("stripe/webhook/", views.stripe_webhook, name='stripe_webhook'),
     path("/dashboard_stats/", views.dashboard_stats, name='dashboard_stats'),
+
+    path("subcategories/create/", views.create_subcategory, name="create_subcategory"),
+    path("subcategories/", views.list_subcategories, name='subcategories'),
+    path("subcategories/<int:pk>/update/", views.update_subcategory, name='update_subcategory'),
+    path("subcategories/<int:pk>/delete/", views.delete_subcategory, name='delete_subcategory'),
+
 ]

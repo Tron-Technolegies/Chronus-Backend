@@ -9,7 +9,7 @@ from django.http import HttpResponse
 from datetime import datetime
 import cloudinary.uploader
 
-from .models import Category, Brand, Product, Order, Coupon, ProductImage
+from .models import Category, Brand, Product, Order, Coupon, ProductImage, SubCategory
 
 # Create your views here.
 
@@ -744,3 +744,81 @@ def dashboard_stats(request):
         "category_revenue": category_revenue_data,
         "top_products": list(top_products),
     })
+
+def create_subcategory(request):
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    name = data.get("name")
+
+    if not name:
+        return JsonResponse({"error": "name required"}, status=400)
+
+    if SubCategory.objects.filter(name__iexact=name).exists():
+        return JsonResponse({"error": "Subcategory already exists"}, status=400)
+
+    sub = SubCategory.objects.create(name=name)
+
+    return JsonResponse(
+        {"id": sub.id, "name": sub.name},
+        status=201
+    )
+
+from django.http import JsonResponse
+from .models import SubCategory
+
+
+def list_subcategories(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "GET required"}, status=405)
+
+    subs = SubCategory.objects.all().order_by("name")
+
+    data = [
+        {"id": s.id, "name": s.name}
+        for s in subs
+    ]
+
+    return JsonResponse(data, safe=False)
+
+
+from django.views.decorators.http import require_http_methods
+from django.shortcuts import get_object_or_404
+from django.contrib.admin.views.decorators import staff_member_required
+import json
+
+
+@require_http_methods(["PUT", "PATCH"])
+@staff_member_required
+def update_subcategory(request, pk):
+    sub = get_object_or_404(SubCategory, pk=pk)
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    name = data.get("name")
+
+    if not name:
+        return JsonResponse({"error": "name required"}, status=400)
+
+    if SubCategory.objects.filter(name__iexact=name).exclude(id=sub.id).exists():
+        return JsonResponse({"error": "Subcategory already exists"}, status=400)
+
+    sub.name = name
+    sub.save()
+
+    return JsonResponse({"id": sub.id, "name": sub.name})
+
+from django.views.decorators.http import require_DELETE
+
+
+@require_DELETE
+@staff_member_required
+def delete_subcategory(request, pk):
+    sub = get_object_or_404(SubCategory, pk=pk)
+    sub.delete()
+    return JsonResponse({"message": "Subcategory deleted"})
