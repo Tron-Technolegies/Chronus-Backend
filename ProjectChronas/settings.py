@@ -178,3 +178,4 @@ DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET=env("STRIPE_WEBHOOK_SECRET")
 
+test ='test'
