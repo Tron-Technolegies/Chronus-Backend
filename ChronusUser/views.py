@@ -7,6 +7,7 @@ from rest_framework import status
 from ChronasAdmin.models import Coupon, Product, Order, OrderItem, SubCategory
 from .models import GuestSession, Cart, CartItem, Wishlist, Review
 from .models import Category, Brand, Product, Order, Coupon, SubCategory
+from django.db.models import Q
 # ===============================
 # GUEST SESSION
 # ===============================
