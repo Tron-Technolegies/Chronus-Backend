@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 import os
 from pathlib import Path
+from corsheaders.defaults import default_headers
 import environ
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -44,6 +45,10 @@ CORS_ALLOWED_ORIGINS = [
     "https://www.chronosgallery.com",
     'chronosgalleriesadmin.netlify.app',   
     'https://chronosgalleries.netlify.app/'
+]
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "x-guest-id",
 ]
 
 # Application definition
