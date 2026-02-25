@@ -43,8 +43,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5174",
     "https://chronosgallery.com",
     "https://www.chronosgallery.com",
-    'chronosgalleriesadmin.netlify.app',   
-    'https://chronosgalleries.netlify.app/'
+    "https://chronosgalleriesadmin.netlify.app",
+    "https://chronosgalleries.netlify.app",
 ]
 
 CORS_ALLOW_HEADERS = list(default_headers) + [
