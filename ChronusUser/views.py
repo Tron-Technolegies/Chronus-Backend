@@ -8,6 +8,7 @@ from ChronasAdmin.models import Coupon, Product, Order, OrderItem, SubCategory
 from .models import GuestSession, Cart, CartItem, Wishlist, Review
 from ChronasAdmin.models import Category, Brand, Product, Order, Coupon, SubCategory
 from django.db.models import Q
+from django.views.decorators.http import require_http_methods
 # ===============================
 # GUEST SESSION
 # ===============================
