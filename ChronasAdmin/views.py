@@ -66,15 +66,22 @@ def add_category(request):
     try:
         data = json.loads(request.body)
         name = data.get("name")
+        description = request.POST.get("description", "")
+        image = request.FILES.get("image")
 
         if not name:
             return JsonResponse({"error": "Category name is required"}, status=400)
 
-        category = Category.objects.create(name=name)
+        category = Category.objects.create(
+            name=name,
+            description=description,
+            image=image)
 
         return JsonResponse({
             "id": category.id,
             "name": category.name,
+            "description": category.description,
+            "image": category.image.url if category.image else None,
             "created_at": category.created_at
         }, status=201)
 
@@ -97,6 +104,8 @@ def view_categories(request):
         {
             "id": category.id,
             "name": category.name,
+            "description": category.description,
+            "image": category.image.url if category.image else None,
             "created_at": category.created_at
         }
         for category in categories
@@ -106,33 +115,38 @@ def view_categories(request):
 
 
 @csrf_exempt
-@csrf_exempt
 @require_http_methods(["PUT"])
 def update_category(request, category_id):
     try:
         category = Category.objects.get(id=category_id)
-        data = json.loads(request.body)
 
-        name = data.get("name")
+        name = request.POST.get("name")
+        description = request.POST.get("description")
+        image = request.FILES.get("image")
+
         if not name:
             return JsonResponse({"error": "Category name is required"}, status=400)
 
         category.name = name
+
+        if description is not None:
+            category.description = description
+
+        if image:
+            category.image = image
+
         category.save()
 
         return JsonResponse({
             "id": category.id,
             "name": category.name,
+            "description": category.description,
+            "image": category.image.url if category.image else None,
             "created_at": category.created_at
         })
 
     except Category.DoesNotExist:
         return JsonResponse({"error": "Category not found"}, status=404)
-
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON format"}, status=400)
-
-
 @csrf_exempt
 @require_http_methods(["DELETE"])
 def delete_category(request, category_id):
@@ -747,6 +761,8 @@ def dashboard_stats(request):
 
 
 from django.contrib.admin.views.decorators import staff_member_required
+
+@csrf_exempt
 @require_http_methods(["POST"])
 @staff_member_required
 def create_subcategory(request):
@@ -793,7 +809,7 @@ from django.shortcuts import get_object_or_404
 from django.contrib.admin.views.decorators import staff_member_required
 import json
 
-
+@csrf_exempt
 @require_http_methods(["PUT", "PATCH"])
 @staff_member_required
 def update_subcategory(request, pk):
@@ -822,7 +838,7 @@ def update_subcategory(request, pk):
 
 from django.views.decorators.http import require_http_methods
 
-
+@csrf_exempt
 @require_http_methods(["DELETE"])
 @staff_member_required
 def delete_subcategory(request, pk):

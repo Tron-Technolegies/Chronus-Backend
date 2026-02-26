@@ -319,11 +319,18 @@ def login(request):
 
 
 
-
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_products(request):
+    subcategory = request.GET.get("subcategory")
+
     products = Product.objects.all()
+
+    if subcategory:
+        if subcategory.isdigit():
+            products = products.filter(subcategory__id=subcategory)
+        else:
+            products = products.filter(subcategory__name__icontains=subcategory)
 
     data = [
         {
@@ -333,6 +340,10 @@ def view_products(request):
                 "id": product.category.id,
                 "name": product.category.name
             } if product.category else None,
+            "subcategory": {
+                "id": product.subcategory.id,
+                "name": product.subcategory.name
+            } if getattr(product, "subcategory", None) else None,
             "brand": {
                 "id": product.brand.id,
                 "name": product.brand.name
@@ -343,7 +354,7 @@ def view_products(request):
             "image": product.image.url if product.image else None,
             "created_at": product.created_at,
             "gallery": [
-            img.image.url for img in product.gallery.all()
+                img.image.url for img in product.gallery.all()
             ],
             "is_featured": product.is_featured,
             "is_best_seller": product.is_best_seller
@@ -352,7 +363,6 @@ def view_products(request):
     ]
 
     return JsonResponse({"products": data}, status=200)
-
 
 from django.views.decorators.http import require_http_methods
 @csrf_exempt
