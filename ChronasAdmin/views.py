@@ -822,7 +822,6 @@ from django.views.decorators.http import require_http_methods
 
 
 @require_http_methods(["DELETE"])
-@staff_member_required
 def delete_subcategory(request, pk):
     sub = get_object_or_404(SubCategory, pk=pk)
     sub.delete()
