@@ -64,8 +64,7 @@ def view_users(request):
 @require_http_methods(["POST"])
 def add_category(request):
     try:
-        data = json.loads(request.body)
-        name = data.get("name")
+        name = request.POST.get("name")
         description = request.POST.get("description", "")
         image = request.FILES.get("image")
 
@@ -75,7 +74,8 @@ def add_category(request):
         category = Category.objects.create(
             name=name,
             description=description,
-            image=image)
+            image=image
+        )
 
         return JsonResponse({
             "id": category.id,
@@ -85,12 +85,8 @@ def add_category(request):
             "created_at": category.created_at
         }, status=201)
 
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON format"}, status=400)
-
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
-    
 
 @require_http_methods(["GET"])
 def view_categories(request):
@@ -113,9 +109,8 @@ def view_categories(request):
 
     return JsonResponse({"categories": data}, status=200)
 
-
 @csrf_exempt
-@require_http_methods(["PUT"])
+@require_http_methods(["POST"])
 def update_category(request, category_id):
     try:
         category = Category.objects.get(id=category_id)
@@ -147,6 +142,7 @@ def update_category(request, category_id):
 
     except Category.DoesNotExist:
         return JsonResponse({"error": "Category not found"}, status=404)
+
 @csrf_exempt
 @require_http_methods(["DELETE"])
 def delete_category(request, category_id):
