@@ -745,6 +745,8 @@ def dashboard_stats(request):
         "top_products": list(top_products),
     })
 
+
+from django.contrib.admin.views.decorators import staff_member_required
 @require_http_methods(["POST"])
 @staff_member_required
 def create_subcategory(request):
@@ -822,6 +824,7 @@ from django.views.decorators.http import require_http_methods
 
 
 @require_http_methods(["DELETE"])
+@staff_member_required
 def delete_subcategory(request, pk):
     sub = get_object_or_404(SubCategory, pk=pk)
     sub.delete()
