@@ -817,7 +817,7 @@ def update_subcategory(request, pk):
 
     return JsonResponse({"id": sub.id, "name": sub.name})
 
-from django.views.decorators.http import require_DELETE
+
 
 
 from django.views.decorators.http import require_http_methods
