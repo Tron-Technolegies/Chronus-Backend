@@ -79,6 +79,7 @@ def view_cart(request):
             "product_id": item.product.id,
             "product": item.product.name,
             "price": item.product.price,
+            "image": item.product.image.url if item.product.image else None,
             "quantity": item.quantity,
             "total": item.quantity * item.product.price
         }
@@ -86,10 +87,11 @@ def view_cart(request):
     ]
     return Response(data)
 
-
 # ===============================
 # WISHLIST
 # ===============================
+import uuid
+
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def add_to_wishlist(request):
@@ -103,13 +105,19 @@ def add_to_wishlist(request):
         Wishlist.objects.get_or_create(user=request.user, product=product)
     else:
         guest_id = request.headers.get("guest_id")
+
+        # auto create guest id if missing
         if not guest_id:
-            return Response({"error": "guest_id required"}, status=400)
+            guest_id = str(uuid.uuid4())
 
         Wishlist.objects.get_or_create(guest_id=guest_id, product=product)
 
-    return Response({"message": "Added to wishlist"})
+        return Response({
+            "message": "Added to wishlist",
+            "guest_id": guest_id   # send back so frontend stores it
+        })
 
+    return Response({"message": "Added to wishlist"})
 
 # ===============================
 # REVIEW
@@ -430,6 +438,8 @@ def view_categories(request):
         {
             "id": category.id,
             "name": category.name,
+            "description":category.description,
+            "image": category.image.url if category.image else None,
             "created_at": category.created_at
         }
         for category in categories
