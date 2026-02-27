@@ -31,7 +31,4 @@ urlpatterns = [
     path('view_coupons/', views.view_coupons, name='view_coupons'),
     path("subcategories/", views.list_subcategories, name='subcategories'),
 
-
-
-
 ]

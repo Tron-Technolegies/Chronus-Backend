@@ -9,6 +9,8 @@ from .models import GuestSession, Cart, CartItem, Wishlist, Review
 from ChronasAdmin.models import Category, Brand, Product, Order, Coupon, SubCategory
 from django.db.models import Q
 from django.views.decorators.http import require_http_methods
+from django.db.models import Avg, Count
+
 # ===============================
 # GUEST SESSION
 # ===============================
@@ -388,6 +390,11 @@ def view_single_product(request, product_id):
         product = Product.objects.select_related(
             "category", "subcategory", "brand"
         ).prefetch_related("gallery").get(id=product_id)
+        reviews_qs = Review.objects.filter(product=product).order_by("-created_at")
+        rating_summary = reviews_qs.aggregate(
+            avg_rating=Avg("rating"),
+            total_reviews=Count("id")
+        )
 
         data = {
             "id": product.id,
@@ -415,14 +422,26 @@ def view_single_product(request, product_id):
             "gallery": [img.image.url for img in product.gallery.all()],
             "is_featured": product.is_featured,
             "is_best_seller": product.is_best_seller,
-            "created_at": product.created_at
+            "created_at": product.created_at,
+            "average_rating": round(rating_summary["avg_rating"] or 0, 1),
+            "review_count": rating_summary["total_reviews"],
+            "reviews": [
+                {
+                    "id": r.id,
+                    "name": r.name,
+                    "rating": r.rating,
+                    "comment": r.comment,
+                    "created_at": r.created_at,
+                }
+                for r in reviews_qs
+            ]
         }
 
         return JsonResponse(data, status=200)
 
     except Product.DoesNotExist:
         return JsonResponse({"error": "Product not found"}, status=404)
-    
+        
 from django.views.decorators.http import require_http_methods
 @csrf_exempt
 @require_http_methods(["GET"])

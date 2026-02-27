@@ -263,19 +263,25 @@ def add_products(request):
             category = Category.objects.filter(id=category_id).first()
             if not category:
                 return JsonResponse({"error": "Invalid category"}, status=400)
+        
+        subcategory_id = request.POST.get("subcategory")
 
+        subcategory = None
+        if subcategory_id:
+            subcategory = SubCategory.objects.filter(id=subcategory_id).first()
         brand = None
         if brand_id:
             brand = Brand.objects.filter(id=brand_id).first()
             if not brand:
                 return JsonResponse({"error": "Invalid brand"}, status=400)
             
-        is_featured = request.POST.get("is_featured") == "true"
-        is_best_seller = request.POST.get("is_best_seller") == "true"
+        is_featured = request.POST.get("is_featured") in ["true", "True", "1"]
+        is_best_seller = request.POST.get("is_best_seller") in ["true", "True", "1"]
 
         product = Product.objects.create(
             name=name,
             category=category,
+            subcategory=subcategory,
             brand=brand,
             price=price,
             description=description,
@@ -299,6 +305,10 @@ def add_products(request):
             "category": product.category.id if product.category else None,
             "brand": product.brand.id if product.brand else None,
             "price": str(product.price),
+            "subcategory": {
+    "id": product.subcategory.id,
+    "name": product.subcategory.name
+} if product.subcategory else None,
             "description": product.description,
             "stock": product.stock,
             "image": product.image.url if product.image else None,
@@ -329,6 +339,10 @@ def view_products(request):
                 "id": product.brand.id,
                 "name": product.brand.name
             } if product.brand else None,
+            "subcategory": {
+            "id": product.subcategory.id,
+            "name": product.subcategory.name
+        } if getattr(product, "subcategory", None) else None,
             "price": str(product.price),
             "description": product.description,
             "stock": product.stock,
@@ -367,7 +381,14 @@ def update_product(request, product_id):
             if not category:
                 return JsonResponse({"error": "Invalid category"}, status=400)
             product.category = category
+        subcategory_id = request.POST.get("subcategory")
 
+        if subcategory_id is not None:
+            if subcategory_id == "":
+                product.subcategory = None
+            else:
+                subcategory = SubCategory.objects.filter(id=subcategory_id).first()
+                product.subcategory = subcategory
         if brand_id:
             brand = Brand.objects.filter(id=brand_id).first()
             if not brand:
