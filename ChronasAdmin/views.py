@@ -673,7 +673,7 @@ def stripe_webhook(request):
             order = Order.objects.get(id=order_id)
             order.payment_status = "paid"
             order.payment_id = payment_id
-            order.status = "paid"
+            order.status = "processing"
             order.save()
             print(f" Order {order_id} marked paid")
         except Order.DoesNotExist:
