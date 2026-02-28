@@ -259,7 +259,6 @@ def my_orders(request):
 # # ===============================
 # import stripe
 # from django.conf import settings
-# from rest_framework.views import APIView, csrf_exempt
 
 # stripe.api_key = settings.STRIPE_SECRET_KEY
 

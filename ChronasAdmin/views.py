@@ -200,7 +200,7 @@ def view_brands(request):
     return JsonResponse({"brands": data}, status=200)
 
 
-@csrf_exempt
+
 @csrf_exempt
 @require_http_methods(["PUT"])
 def update_brand(request, brand_id):
