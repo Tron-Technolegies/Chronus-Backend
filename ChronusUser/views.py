@@ -169,13 +169,26 @@ def checkout(request):
         guest_id = request.headers.get("X-Guest-Id")
         if not guest_id:
             return Response({"error": "guest_id required"}, status=400)
+    
+    
+    city = request.data.get("city", "")
+    postal_code = request.data.get("postal_code", "")
+    country = request.data.get("country", "")
+    first_name = request.data.get("first_name", "")
+    last_name = request.data.get("last_name", "")
+
+    shipping_address = f"{first_name} {last_name}, {city}, {postal_code}, {country}".strip(", ").strip()
+
+    if not shipping_address:
+        return Response({"error": "shipping address required"}, status=400)
+
 
     order = Order.objects.create(
         user=request.user if request.user.is_authenticated else None,
         guest_id=guest_id,
         email=request.data.get("email"),
         phone=request.data.get("phone"),
-        shipping_address=request.data.get("address"),
+        shipping_address=shipping_address,
         total_amount=total,
     )
 
