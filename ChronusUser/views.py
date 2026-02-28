@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework import status
 import stripe
 from ChronasAdmin.models import Coupon, Product, Order, OrderItem, SubCategory
+from ChronusUser.utils import apply_coupon_to_order
 from .models import GuestSession, Cart, CartItem, Wishlist, Review
 from ChronasAdmin.models import Category, Brand, Product, Order, Coupon, SubCategory
 from django.db.models import Q
@@ -589,3 +590,27 @@ def view_categories(request):
 
     return JsonResponse({"categories": data}, status=200)
 
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def apply_coupon(request):
+    order_id = request.data.get("order_id")
+    code = request.data.get("coupon_code")
+
+    if not order_id or not code:
+        return Response({"error": "order_id and coupon_code required"}, status=400)
+
+    try:
+        order = Order.objects.get(id=order_id)
+    except Order.DoesNotExist:
+        return Response({"error": "Order not found"}, status=404)
+
+    ok, msg = apply_coupon_to_order(order, code)
+
+    if not ok:
+        return Response({"error": msg}, status=400)
+
+    return Response({
+        "message": msg,
+        "new_total": order.total_amount,
+        "discount": order.discount_amount
+    })
