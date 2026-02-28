@@ -74,20 +74,48 @@ def add_to_cart(request):
 @permission_classes([AllowAny])
 def view_cart(request):
     cart = get_cart(request)
-    items = CartItem.objects.filter(cart=cart)
+    items = CartItem.objects.select_related("product").filter(cart=cart)
 
-    data = [
-        {
+    subtotal = 0
+
+    data = []
+
+    for item in items:
+        total = item.quantity * item.product.price
+        subtotal += total
+
+        data.append({
             "product_id": item.product.id,
             "product": item.product.name,
             "price": item.product.price,
             "image": item.product.image.url if item.product.image else None,
             "quantity": item.quantity,
-            "total": item.quantity * item.product.price
-        }
-        for item in items
-    ]
-    return Response(data)
+            "total": total
+        })
+
+    return Response({
+        "items": data,
+        "subtotal": subtotal
+    })
+
+@api_view(["DELETE"])
+@permission_classes([AllowAny])
+def remove_from_cart(request, product_id):
+    cart = get_cart(request)
+
+    try:
+        item = CartItem.objects.get(cart=cart, product_id=product_id)
+        item.delete()
+        return Response({"message": "Item removed"})
+    except CartItem.DoesNotExist:
+        return Response({"error": "Item not found in cart"}, status=404)
+    
+@api_view(["DELETE"])
+@permission_classes([AllowAny])
+def clear_cart(request):
+    cart = get_cart(request)
+    CartItem.objects.filter(cart=cart).delete()
+    return Response({"message": "Cart cleared"})
 
 # ===============================
 # WISHLIST
