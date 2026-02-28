@@ -9,6 +9,8 @@ from .models import GuestSession, Cart, CartItem, Wishlist, Review
 from ChronasAdmin.models import Category, Brand, Product, Order, Coupon, SubCategory
 from django.db.models import Q
 from django.views.decorators.http import require_http_methods
+from django.db.models import Avg, Count
+
 # ===============================
 # GUEST SESSION
 # ===============================
@@ -331,9 +333,17 @@ def login(request):
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_products(request):
+    category = request.GET.get("category")
     subcategory = request.GET.get("subcategory")
+    products = Product.objects.select_related(
+        "category", "subcategory", "brand"
+    ).prefetch_related("gallery").all()
 
-    products = Product.objects.all()
+    if category:
+        if category.isdigit():
+            products = products.filter(category__id=category)
+        else:
+            products = products.filter(category__name__icontains=category)
 
     if subcategory:
         if subcategory.isdigit():
@@ -349,22 +359,23 @@ def view_products(request):
                 "id": product.category.id,
                 "name": product.category.name
             } if product.category else None,
+
             "subcategory": {
                 "id": product.subcategory.id,
                 "name": product.subcategory.name
             } if getattr(product, "subcategory", None) else None,
+
             "brand": {
                 "id": product.brand.id,
                 "name": product.brand.name
             } if product.brand else None,
+
             "price": str(product.price),
             "description": product.description,
             "stock": product.stock,
             "image": product.image.url if product.image else None,
             "created_at": product.created_at,
-            "gallery": [
-                img.image.url for img in product.gallery.all()
-            ],
+            "gallery": [img.image.url for img in product.gallery.all()],
             "is_featured": product.is_featured,
             "is_best_seller": product.is_best_seller
         }
@@ -373,6 +384,65 @@ def view_products(request):
 
     return JsonResponse({"products": data}, status=200)
 
+@csrf_exempt
+@require_http_methods(["GET"])
+def view_single_product(request, product_id):
+    try:
+        product = Product.objects.select_related(
+            "category", "subcategory", "brand"
+        ).prefetch_related("gallery").get(id=product_id)
+        reviews_qs = Review.objects.filter(product=product).order_by("-created_at")
+        rating_summary = reviews_qs.aggregate(
+            avg_rating=Avg("rating"),
+            total_reviews=Count("id")
+        )
+
+        data = {
+            "id": product.id,
+            "name": product.name,
+
+            "category": {
+                "id": product.category.id,
+                "name": product.category.name
+            } if product.category else None,
+
+            "subcategory": {
+                "id": product.subcategory.id,
+                "name": product.subcategory.name
+            } if getattr(product, "subcategory", None) else None,
+
+            "brand": {
+                "id": product.brand.id,
+                "name": product.brand.name
+            } if product.brand else None,
+
+            "price": str(product.price),
+            "description": product.description,
+            "stock": product.stock,
+            "image": product.image.url if product.image else None,
+            "gallery": [img.image.url for img in product.gallery.all()],
+            "is_featured": product.is_featured,
+            "is_best_seller": product.is_best_seller,
+            "created_at": product.created_at,
+            "average_rating": round(rating_summary["avg_rating"] or 0, 1),
+            "review_count": rating_summary["total_reviews"],
+            "reviews": [
+                {
+                    "id": r.id,
+                    "name": r.name,
+                    "rating": r.rating,
+                    "comment": r.comment,
+                    "created_at": r.created_at,
+                }
+                for r in reviews_qs
+            ]
+        }
+
+        return JsonResponse(data, status=200)
+
+    except Product.DoesNotExist:
+        return JsonResponse({"error": "Product not found"}, status=404)
+        
 from django.views.decorators.http import require_http_methods
 @csrf_exempt
 @require_http_methods(["GET"])
