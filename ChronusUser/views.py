@@ -163,7 +163,8 @@ def checkout(request):
 
     guest_id = None
     if not request.user.is_authenticated:
-        guest_id = request.headers.get("guest_id")
+        # guest_id = request.headers.get("guest_id")
+        guest_id = request.headers.get("X-Guest-Id")
         if not guest_id:
             return Response({"error": "guest_id required"}, status=400)
 
