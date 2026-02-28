@@ -620,10 +620,35 @@ from django.conf import settings
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
+# @csrf_exempt
+# def stripe_webhook(request):
+#     print("🔔 Stripe webhook called")
+
+#     payload = request.body
+#     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
+
+#     try:
+#         event = stripe.Webhook.construct_event(
+#             payload,
+#             sig_header,
+#             settings.STRIPE_WEBHOOK_SECRET
+#         )
+#     except Exception:
+#         return HttpResponse(status=400)
+
+#     print("Stripe Event:", event["type"])
+#     return HttpResponse(status=200)
+from django.views.decorators.csrf import csrf_exempt
+from django.http import HttpResponse
+from ChronasAdmin.models import Order
+import stripe
+from django.conf import settings
+
+stripe.api_key = settings.STRIPE_SECRET_KEY
+
+
 @csrf_exempt
 def stripe_webhook(request):
-    print("🔔 Stripe webhook called")
-
     payload = request.body
     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
 
@@ -633,12 +658,29 @@ def stripe_webhook(request):
             sig_header,
             settings.STRIPE_WEBHOOK_SECRET
         )
+    except stripe.error.SignatureVerificationError:
+        return HttpResponse(status=400)
     except Exception:
         return HttpResponse(status=400)
 
-    print("Stripe Event:", event["type"])
-    return HttpResponse(status=200)
+    # ✅ handle successful payment
+    if event["type"] == "payment_intent.succeeded":
+        intent = event["data"]["object"]
 
+        order_id = intent["metadata"].get("order_id")
+        payment_id = intent["id"]
+
+        try:
+            order = Order.objects.get(id=order_id)
+            order.payment_status = "paid"
+            order.payment_id = payment_id
+            order.status = "paid"
+            order.save()
+            print(f" Order {order_id} marked paid")
+        except Order.DoesNotExist:
+            print(f" Order {order_id} not found")
+
+    return HttpResponse(status=200)
 
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods

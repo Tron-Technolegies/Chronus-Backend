@@ -1,9 +1,10 @@
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import APIView, api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
+import stripe
 from ChronasAdmin.models import Coupon, Product, Order, OrderItem, SubCategory
 from .models import GuestSession, Cart, CartItem, Wishlist, Review
 from ChronasAdmin.models import Category, Brand, Product, Order, Coupon, SubCategory
@@ -253,36 +254,68 @@ def my_orders(request):
     return Response(data)
 
 
-# ===============================
-# STRIPE PAYMENT
-# ===============================
-import stripe
-from django.conf import settings
-from rest_framework.views import APIView, csrf_exempt
+# # ===============================
+# # STRIPE PAYMENT
+# # ===============================
+# import stripe
+# from django.conf import settings
+# from rest_framework.views import APIView, csrf_exempt
 
-stripe.api_key = settings.STRIPE_SECRET_KEY
+# stripe.api_key = settings.STRIPE_SECRET_KEY
 
+
+# class CreatePaymentIntentView(APIView):
+#     permission_classes = [AllowAny]  # allow guest
+
+#     def post(self, request):
+#         try:
+#             amount = request.data.get("amount")
+#             currency = request.data.get("currency", "usd")
+
+#             if not amount:
+#                 return Response({"error": "Amount required"}, status=400)
+
+#             amount_in_cents = int(float(amount) * 100)
+
+#             intent = stripe.PaymentIntent.create(
+#                 amount=amount_in_cents,
+#                 currency=currency.lower(),
+#                 payment_method_types=["card"],
+#                 metadata={
+#                     "user_id": request.user.id if request.user.is_authenticated else None,
+#                     "email": request.data.get("email"),
+#                 }
+#             )
+
+#             return Response({
+#                 "client_secret": intent.client_secret,
+#                 "payment_intent_id": intent.id
+#             })
+
+#         except stripe.error.StripeError as e:
+#             return Response({"error": str(e)}, status=400)
 
 class CreatePaymentIntentView(APIView):
-    permission_classes = [AllowAny]  # allow guest
+    permission_classes = [AllowAny]
 
     def post(self, request):
         try:
-            amount = request.data.get("amount")
-            currency = request.data.get("currency", "usd")
+            order_id = request.data.get("order_id")
+            if not order_id:
+                return Response({"error": "order_id required"}, status=400)
 
-            if not amount:
-                return Response({"error": "Amount required"}, status=400)
+            order = Order.objects.get(id=order_id)
 
-            amount_in_cents = int(float(amount) * 100)
+            amount_in_cents = int(float(order.total_amount) * 100)
 
             intent = stripe.PaymentIntent.create(
                 amount=amount_in_cents,
-                currency=currency.lower(),
+                currency="usd",
                 payment_method_types=["card"],
                 metadata={
-                    "user_id": request.user.id if request.user.is_authenticated else None,
-                    "email": request.data.get("email"),
+                    "order_id": order.id,
+                    "user_id": request.user.id if request.user.is_authenticated else "",
+                    "guest_id": order.guest_id or "",
                 }
             )
 
@@ -291,10 +324,8 @@ class CreatePaymentIntentView(APIView):
                 "payment_intent_id": intent.id
             })
 
-        except stripe.error.StripeError as e:
-            return Response({"error": str(e)}, status=400)
-
-
+        except Order.DoesNotExist:
+            return Response({"error": "Invalid order"}, status=404)
 # ===============================
 # AUTH (JWT)
 # ===============================
@@ -485,6 +516,7 @@ def view_single_product(request, product_id):
         return JsonResponse({"error": "Product not found"}, status=404)
         
 from django.views.decorators.http import require_http_methods
+from django.views.decorators import csrf_exempt
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_coupons(request):
