@@ -401,7 +401,7 @@ def login(request):
     })
 
 
-
+from django.views.decorators.csrf import csrf_exempt
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_products(request):
@@ -516,7 +516,7 @@ def view_single_product(request, product_id):
         return JsonResponse({"error": "Product not found"}, status=404)
         
 from django.views.decorators.http import require_http_methods
-from django.views.decorators import csrf_exempt
+from django.views.decorators.csrf import csrf_exempt
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_coupons(request):
