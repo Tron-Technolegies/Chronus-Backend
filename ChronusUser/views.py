@@ -10,6 +10,7 @@ from .models import GuestSession, Cart, CartItem, Wishlist, Review
 from ChronasAdmin.models import Category, Brand, Product, Order, Coupon, SubCategory
 from django.db.models import Q
 from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_exempt
 from django.db.models import Avg, Count
 
 # ===============================
@@ -399,8 +400,6 @@ def login(request):
         "tokens": tokens
     })
 
-
-from django.views.decorators.csrf import csrf_exempt
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_products(request):
@@ -515,7 +514,7 @@ def view_single_product(request, product_id):
         return JsonResponse({"error": "Product not found"}, status=404)
         
 from django.views.decorators.http import require_http_methods
-from django.views.decorators.csrf import csrf_exempt
+
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_coupons(request):

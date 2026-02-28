@@ -613,7 +613,6 @@ def delete_coupon(request, coupon_id):
 
 
 from django.http import HttpResponse
-from django.views.decorators.csrf import csrf_exempt
 import stripe
 from django.conf import settings
 
@@ -638,7 +637,7 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 
 #     print("Stripe Event:", event["type"])
 #     return HttpResponse(status=200)
-from django.views.decorators.csrf import csrf_exempt
+
 from django.http import HttpResponse
 from ChronasAdmin.models import Order
 import stripe
