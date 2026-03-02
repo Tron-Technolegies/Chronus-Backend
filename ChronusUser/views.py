@@ -77,8 +77,14 @@ def add_to_cart(request):
 @permission_classes([AllowAny])
 def view_cart(request):
     cart = get_cart(request)
-    items = CartItem.objects.select_related("product").filter(cart=cart)
-
+    # items = CartItem.objects.select_related("product").filter(cart=cart)
+    items = CartItem.objects.select_related("product").only(
+    "quantity",
+    "product__id",
+    "product__name",
+    "product__price",
+    "product__image"
+).filter(cart=cart)
     subtotal = 0
 
     data = []
@@ -183,25 +189,77 @@ def add_review(request):
 # ===============================
 # CHECKOUT
 # ===============================
+# @api_view(["POST"])
+# @permission_classes([AllowAny])
+# def checkout(request):
+#     cart = get_cart(request)
+#     items = CartItem.objects.filter(cart=cart)
+
+#     if not items.exists():
+#         return Response({"error": "Cart is empty"}, status=400)
+
+#     total = sum(i.quantity * i.product.price for i in items)
+
+#     guest_id = None
+#     if not request.user.is_authenticated:
+#         # guest_id = request.headers.get("guest_id")
+#         guest_id = request.headers.get("X-Guest-Id")
+#         if not guest_id:
+#             return Response({"error": "guest_id required"}, status=400)
+    
+    
+#     city = request.data.get("city", "")
+#     postal_code = request.data.get("postal_code", "")
+#     country = request.data.get("country", "")
+#     first_name = request.data.get("first_name", "")
+#     last_name = request.data.get("last_name", "")
+
+#     shipping_address = f"{first_name} {last_name}, {city}, {postal_code}, {country}".strip(", ").strip()
+
+#     if not shipping_address:
+#         return Response({"error": "shipping address required"}, status=400)
+
+
+#     order = Order.objects.create(
+#         user=request.user if request.user.is_authenticated else None,
+#         guest_id=guest_id,
+#         email=request.data.get("email"),
+#         phone=request.data.get("phone"),
+#         shipping_address=shipping_address,
+#         total_amount=total,
+#     )
+
+#     for item in items:
+#         OrderItem.objects.create(
+#             order=order,
+#             product=item.product,
+#             quantity=item.quantity,
+#             price=item.product.price
+#         )
+
+#     items.delete()  # clear cart
+
+#     return Response({"order_id": order.id, "amount": total})
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def checkout(request):
     cart = get_cart(request)
-    items = CartItem.objects.filter(cart=cart)
+
+    items = CartItem.objects.select_related("product").filter(cart=cart)
 
     if not items.exists():
         return Response({"error": "Cart is empty"}, status=400)
 
-    total = sum(i.quantity * i.product.price for i in items)
+    total = 0
+    for i in items:
+        total += i.quantity * i.product.price
 
     guest_id = None
     if not request.user.is_authenticated:
-        # guest_id = request.headers.get("guest_id")
         guest_id = request.headers.get("X-Guest-Id")
         if not guest_id:
             return Response({"error": "guest_id required"}, status=400)
-    
-    
+
     city = request.data.get("city", "")
     postal_code = request.data.get("postal_code", "")
     country = request.data.get("country", "")
@@ -213,7 +271,6 @@ def checkout(request):
     if not shipping_address:
         return Response({"error": "shipping address required"}, status=400)
 
-
     order = Order.objects.create(
         user=request.user if request.user.is_authenticated else None,
         guest_id=guest_id,
@@ -223,18 +280,20 @@ def checkout(request):
         total_amount=total,
     )
 
-    for item in items:
-        OrderItem.objects.create(
+    order_items = [
+        OrderItem(
             order=order,
-            product=item.product,
-            quantity=item.quantity,
-            price=item.product.price
+            product=i.product,
+            quantity=i.quantity,
+            price=i.product.price
         )
+        for i in items
+    ]
+    OrderItem.objects.bulk_create(order_items)
 
-    items.delete()  # clear cart
+    items.delete()
 
     return Response({"order_id": order.id, "amount": total})
-
 
 # ===============================
 # USER ORDERS (AUTH)
@@ -256,45 +315,6 @@ def my_orders(request):
     return Response(data)
 
 
-# # ===============================
-# # STRIPE PAYMENT
-# # ===============================
-# import stripe
-# from django.conf import settings
-
-# stripe.api_key = settings.STRIPE_SECRET_KEY
-
-
-# class CreatePaymentIntentView(APIView):
-#     permission_classes = [AllowAny]  # allow guest
-
-#     def post(self, request):
-#         try:
-#             amount = request.data.get("amount")
-#             currency = request.data.get("currency", "usd")
-
-#             if not amount:
-#                 return Response({"error": "Amount required"}, status=400)
-
-#             amount_in_cents = int(float(amount) * 100)
-
-#             intent = stripe.PaymentIntent.create(
-#                 amount=amount_in_cents,
-#                 currency=currency.lower(),
-#                 payment_method_types=["card"],
-#                 metadata={
-#                     "user_id": request.user.id if request.user.is_authenticated else None,
-#                     "email": request.data.get("email"),
-#                 }
-#             )
-
-#             return Response({
-#                 "client_secret": intent.client_secret,
-#                 "payment_intent_id": intent.id
-#             })
-
-#         except stripe.error.StripeError as e:
-#             return Response({"error": str(e)}, status=400)
 
 class CreatePaymentIntentView(APIView):
     permission_classes = [AllowAny]
