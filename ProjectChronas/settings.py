@@ -117,17 +117,18 @@ cloudinary.config(
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+import os
+
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'postgres',
-        'USER': 'postgres',
-        'PASSWORD':'DBadminchronas',
-        "HOST": "database-1.cbs0uuisiwda.me-central-1.rds.amazonaws.com",
-        'PORT': '5432',
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.getenv("DB_NAME"),
+        "USER": os.getenv("DB_USER"),
+        "PASSWORD": os.getenv("DB_PASSWORD"),
+        "HOST": os.getenv("DB_HOST"),
+        "PORT": "5432",
     }
 }
-
 from datetime import timedelta
 
 REST_FRAMEWORK = {
