@@ -1,6 +1,6 @@
 from django.utils import timezone
 from decimal import Decimal
-from .models import Coupon
+from ChronasAdmin.models import Coupon
 
 def apply_coupon_to_order(order, code):
     try:

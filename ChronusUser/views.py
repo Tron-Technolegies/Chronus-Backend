@@ -401,14 +401,75 @@ def login(request):
         "tokens": tokens
     })
 
+# @csrf_exempt
+# @require_http_methods(["GET"])
+# def view_products(request):
+#     category = request.GET.get("category")
+#     subcategory = request.GET.get("subcategory")
+#     products = Product.objects.select_related(
+#         "category", "subcategory", "brand"
+#     ).prefetch_related("gallery").all()
+
+#     if category:
+#         if category.isdigit():
+#             products = products.filter(category__id=category)
+#         else:
+#             products = products.filter(category__name__icontains=category)
+
+#     if subcategory:
+#         if subcategory.isdigit():
+#             products = products.filter(subcategory__id=subcategory)
+#         else:
+#             products = products.filter(subcategory__name__icontains=subcategory)
+
+#     data = [
+#         {
+#             "id": product.id,
+#             "name": product.name,
+#             "category": {
+#                 "id": product.category.id,
+#                 "name": product.category.name
+#             } if product.category else None,
+
+#             "subcategory": {
+#                 "id": product.subcategory.id,
+#                 "name": product.subcategory.name
+#             } if getattr(product, "subcategory", None) else None,
+
+#             "brand": {
+#                 "id": product.brand.id,
+#                 "name": product.brand.name
+#             } if product.brand else None,
+
+#             "price": str(product.price),
+#             "description": product.description,
+#             "stock": product.stock,
+#             "image": product.image.url if product.image else None,
+#             "created_at": product.created_at,
+#             "gallery": [img.image.url for img in product.gallery.all()],
+#             "is_featured": product.is_featured,
+#             "is_best_seller": product.is_best_seller
+#         }
+#         for product in products
+#     ]
+
+#     return JsonResponse({"products": data}, status=200)
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_products(request):
     category = request.GET.get("category")
     subcategory = request.GET.get("subcategory")
+
     products = Product.objects.select_related(
         "category", "subcategory", "brand"
-    ).prefetch_related("gallery").all()
+    ).only(
+        "id", "name", "price", "stock",
+        "image", "created_at",
+        "is_featured", "is_best_seller",
+        "category__id", "category__name",
+        "subcategory__id", "subcategory__name",
+        "brand__id", "brand__name"
+    )
 
     if category:
         if category.isdigit():
@@ -422,39 +483,32 @@ def view_products(request):
         else:
             products = products.filter(subcategory__name__icontains=subcategory)
 
-    data = [
-        {
+    data = []
+    for product in products:
+        data.append({
             "id": product.id,
             "name": product.name,
             "category": {
                 "id": product.category.id,
                 "name": product.category.name
             } if product.category else None,
-
             "subcategory": {
                 "id": product.subcategory.id,
                 "name": product.subcategory.name
-            } if getattr(product, "subcategory", None) else None,
-
+            } if product.subcategory else None,
             "brand": {
                 "id": product.brand.id,
                 "name": product.brand.name
             } if product.brand else None,
-
             "price": str(product.price),
-            "description": product.description,
             "stock": product.stock,
             "image": product.image.url if product.image else None,
             "created_at": product.created_at,
-            "gallery": [img.image.url for img in product.gallery.all()],
             "is_featured": product.is_featured,
             "is_best_seller": product.is_best_seller
-        }
-        for product in products
-    ]
+        })
 
     return JsonResponse({"products": data}, status=200)
-
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_single_product(request, product_id):

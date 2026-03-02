@@ -29,6 +29,10 @@ class Brand(models.Model):
 
 
 class Product(models.Model):
+    GENDER_CHOICES = (
+        ("men", "Men"),
+        ("women", "Women"),
+    )
     name = models.CharField(max_length=200)
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True)
     subcategory = models.ForeignKey(
@@ -38,6 +42,7 @@ class Product(models.Model):
         blank=True,
         related_name="products"
     )
+    gender = models.CharField(max_length=10, choices=GENDER_CHOICES, default='Null')
     brand = models.ForeignKey(Brand, on_delete=models.SET_NULL, null=True)  
     price = models.DecimalField(max_digits=10, decimal_places=2)
     description = models.TextField(blank=True)
