@@ -522,7 +522,8 @@ def view_products(request):
             } if product.brand else None,
             "price": str(product.price),
             "stock": product.stock,
-            "image": product.image.url if product.image else None,
+            # "image": product.image.url if product.image else None,
+            "image": None,
             "created_at": product.created_at,
             "is_featured": product.is_featured,
             "is_best_seller": product.is_best_seller
