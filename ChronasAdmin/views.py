@@ -8,6 +8,7 @@ import json
 from django.http import HttpResponse
 from datetime import datetime
 import cloudinary.uploader
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Category, Brand, Product, Order, Coupon, ProductImage, SubCategory
 
@@ -944,3 +945,42 @@ def delete_subcategory(request, pk):
     sub = get_object_or_404(SubCategory, pk=pk)
     sub.delete()
     return JsonResponse({"message": "Subcategory deleted"})
+
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from django.contrib.auth import authenticate
+
+def get_tokens_for_user(user):
+    refresh = RefreshToken.for_user(user)
+    return {
+        "refresh": str(refresh),
+        "access": str(refresh.access_token),
+    }
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def admin_login(request):
+    email = request.data.get("email")
+    password = request.data.get("password")
+
+    user = authenticate(username=email, password=password)
+
+    if user is None:
+        return Response({"error": "Invalid credentials"}, status=401)
+
+    # Check if user is admin
+    if not user.is_staff:
+        return Response({"error": "Access denied. Admins only."}, status=403)
+
+    tokens = get_tokens_for_user(user)
+    full_name = f"{user.first_name} {user.last_name}".strip()
+
+    return Response({
+        "message": "Admin login successful",
+        "user_id": user.id,
+        "email": user.email,
+        "full_name": full_name,
+        "tokens": tokens
+    })
