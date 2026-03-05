@@ -38,7 +38,7 @@ ALLOWED_HOSTS = [
     "api.chronosgallery.com",
     '3.28.58.78',
     '65.0.131.33' , #mumbai location
-    "apiv2.chronosgallery.com/"
+    "apiv2.chronosgallery.com"
   
 ]
 CORS_ALLOWED_ORIGINS = [
