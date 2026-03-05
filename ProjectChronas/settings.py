@@ -37,7 +37,7 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "api.chronosgallery.com",
     '3.28.58.78',
-    '65.0.131.33'  #mumbai location,
+    '65.0.131.33' , #mumbai location
     "apiv2.chronosgallery.com/"
   
 ]
