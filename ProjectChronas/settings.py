@@ -38,6 +38,7 @@ ALLOWED_HOSTS = [
     "api.chronosgallery.com",
     '3.28.58.78',
     '65.0.131.33'  #mumbai location
+  
 ]
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
@@ -47,7 +48,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://chronosgalleriesadmin.netlify.app",
     "https://chronosgalleries.netlify.app",
     "https://admin.chronosgallery.com",
-    "https://chronosgalleriesadmin.netlify.app/login"
+    "https://chronosgalleriesadmin.netlify.app"
 ]
 
 CORS_ALLOW_HEADERS = list(default_headers) + [
