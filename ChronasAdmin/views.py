@@ -19,7 +19,7 @@ from .models import Category, Brand, Product, Order, Coupon, ProductImage, SubCa
 def view_users(request):
     users = User.objects.all()
 
-    # 🔎 SEARCH
+    #  SEARCH
     search_query = request.GET.get("search")
     if search_query:
         users = users.filter(
@@ -28,7 +28,7 @@ def view_users(request):
             email__icontains=search_query
         )
 
-    # 🔽 FILTER BY ACTIVE STATUS
+    #  FILTER BY ACTIVE STATUS
     is_active = request.GET.get("is_active")
     if is_active is not None:
         if is_active.lower() == "true":
@@ -36,7 +36,7 @@ def view_users(request):
         elif is_active.lower() == "false":
             users = users.filter(is_active=False)
 
-    # 🔽 FILTER BY STAFF
+    #  FILTER BY STAFF
     is_staff = request.GET.get("is_staff")
     if is_staff is not None:
         if is_staff.lower() == "true":
@@ -89,13 +89,38 @@ def add_category(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
+# @require_http_methods(["GET"])
+# def view_categories(request):
+#     search = request.GET.get("search", "")
+
+#     categories = Category.objects.filter(
+#         Q(name__icontains=search)
+#     ).order_by("-id")
+
+#     data = [
+#         {
+#             "id": category.id,
+#             "name": category.name,
+#             "description": category.description,
+#             "image": category.image.url if category.image else None,
+#             "created_at": category.created_at,
+#             "product_count": category.product_set.count()
+#         }
+#         for category in categories
+#     ]
+#     return JsonResponse({"categories": data}, status=200)
+
+
+from django.db.models import Count
+
 @require_http_methods(["GET"])
 def view_categories(request):
     search = request.GET.get("search", "")
 
     categories = Category.objects.filter(
         Q(name__icontains=search)
-    ).order_by("-id")
+    ).annotate(product_count=Count("product")).order_by("-id")
 
     data = [
         {
@@ -103,7 +128,8 @@ def view_categories(request):
             "name": category.name,
             "description": category.description,
             "image": category.image.url if category.image else None,
-            "created_at": category.created_at
+            "created_at": category.created_at,
+            "product_count": category.product_count
         }
         for category in categories
     ]
@@ -240,7 +266,12 @@ def delete_brand(request, brand_id):
 
     except Brand.DoesNotExist:
         return JsonResponse({"error": "Brand not found"}, status=404)
-    
+    import json
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def add_products(request):
@@ -253,6 +284,17 @@ def add_products(request):
         stock = request.POST.get("stock")
         image = request.FILES.get("image")
 
+        specification = request.POST.get("specification")
+
+        # Convert specification JSON string → dictionary
+        if specification:
+            try:
+                specification = json.loads(specification)
+            except json.JSONDecodeError:
+                return JsonResponse({"error": "Invalid specification format"}, status=400)
+        else:
+            specification = {}
+
         if not name:
             return JsonResponse({"error": "Product name is required"}, status=400)
 
@@ -264,18 +306,19 @@ def add_products(request):
             category = Category.objects.filter(id=category_id).first()
             if not category:
                 return JsonResponse({"error": "Invalid category"}, status=400)
-        
+
         subcategory_id = request.POST.get("subcategory")
 
         subcategory = None
         if subcategory_id:
             subcategory = SubCategory.objects.filter(id=subcategory_id).first()
+
         brand = None
         if brand_id:
             brand = Brand.objects.filter(id=brand_id).first()
             if not brand:
                 return JsonResponse({"error": "Invalid brand"}, status=400)
-            
+
         is_featured = request.POST.get("is_featured") in ["true", "True", "1"]
         is_best_seller = request.POST.get("is_best_seller") in ["true", "True", "1"]
 
@@ -289,7 +332,8 @@ def add_products(request):
             stock=stock,
             image=image,
             is_featured=is_featured,
-            is_best_seller=is_best_seller
+            is_best_seller=is_best_seller,
+            specification=specification
         )
 
         gallery_images = request.FILES.getlist("images")
@@ -307,12 +351,13 @@ def add_products(request):
             "brand": product.brand.id if product.brand else None,
             "price": str(product.price),
             "subcategory": {
-    "id": product.subcategory.id,
-    "name": product.subcategory.name
-} if product.subcategory else None,
+                "id": product.subcategory.id,
+                "name": product.subcategory.name
+            } if product.subcategory else None,
             "description": product.description,
             "stock": product.stock,
             "image": product.image.url if product.image else None,
+            "specification": product.specification,
             "created_at": product.created_at,
         }, status=201)
 
@@ -321,7 +366,6 @@ def add_products(request):
             "error": "Something went wrong",
             "details": str(e)
         }, status=500)
-
 
 @csrf_exempt
 @require_http_methods(["GET"])
@@ -341,17 +385,18 @@ def view_products(request):
                 "name": product.brand.name
             } if product.brand else None,
             "subcategory": {
-            "id": product.subcategory.id,
-            "name": product.subcategory.name
-        } if getattr(product, "subcategory", None) else None,
+                "id": product.subcategory.id,
+                "name": product.subcategory.name
+            } if getattr(product, "subcategory", None) else None,
             "price": str(product.price),
             "description": product.description,
             "stock": product.stock,
             "image": product.image.url if product.image else None,
             "created_at": product.created_at,
             "gallery": [
-            img.image.url for img in product.gallery.all()
+                img.image.url for img in product.gallery.all()
             ],
+            "specification": product.specification,   # ✅ Added
             "is_featured": product.is_featured,
             "is_best_seller": product.is_best_seller
         }
@@ -359,6 +404,8 @@ def view_products(request):
     ]
 
     return JsonResponse({"products": data}, status=200)
+
+import json
 
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -373,6 +420,7 @@ def update_product(request, product_id):
         description = request.POST.get("description")
         stock = request.POST.get("stock")
         image = request.FILES.get("image")
+        specification = request.POST.get("specification")
 
         if name:
             product.name = name
@@ -382,6 +430,7 @@ def update_product(request, product_id):
             if not category:
                 return JsonResponse({"error": "Invalid category"}, status=400)
             product.category = category
+
         subcategory_id = request.POST.get("subcategory")
 
         if subcategory_id is not None:
@@ -390,6 +439,7 @@ def update_product(request, product_id):
             else:
                 subcategory = SubCategory.objects.filter(id=subcategory_id).first()
                 product.subcategory = subcategory
+
         if brand_id:
             brand = Brand.objects.filter(id=brand_id).first()
             if not brand:
@@ -411,6 +461,14 @@ def update_product(request, product_id):
 
             product.image = image
 
+        # specification update
+        if specification:
+            try:
+                specification = json.loads(specification)
+                product.specification = specification
+            except json.JSONDecodeError:
+                return JsonResponse({"error": "Invalid specification format"}, status=400)
+
         product.save()
 
         gallery_images = request.FILES.getlist("images")
@@ -422,13 +480,14 @@ def update_product(request, product_id):
 
             product.gallery.all().delete()
 
-            # add new
+            # add new images
             for img in gallery_images:
                 ProductImage.objects.create(product=product, image=img)
 
         return JsonResponse({
             "message": "Product updated successfully",
-            "id": product.id
+            "id": product.id,
+            "specification": product.specification
         })
 
     except Product.DoesNotExist:
@@ -436,7 +495,6 @@ def update_product(request, product_id):
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
-
 
 @csrf_exempt
 @require_http_methods(["DELETE"])
