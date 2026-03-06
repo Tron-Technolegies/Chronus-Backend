@@ -2,7 +2,7 @@ from django.urls import path
 from ChronasAdmin import views
 
 urlpatterns = [
-    path("adminlogin/", views.login, name='login'),
+    path("adminlogin/", views.admin_login, name='login'),
     path('view_users/', views.view_users, name='view_users'),
     path('add_category/', views.add_category, name='add_category'),
     path('view_categories/', views.view_categories, name='view_categories'),

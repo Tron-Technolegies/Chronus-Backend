@@ -958,6 +958,13 @@ def get_tokens_for_user(user):
         "refresh": str(refresh),
         "access": str(refresh.access_token),
     }
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from django.contrib.auth import authenticate
+
+from django.contrib.auth.models import User
+from django.contrib.auth import authenticate
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
@@ -965,16 +972,21 @@ def admin_login(request):
     email = request.data.get("email")
     password = request.data.get("password")
 
-    user = authenticate(username=email, password=password)
+    try:
+        user_obj = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return Response({"error": "Invalid credentials"}, status=401)
+
+    user = authenticate(request, username=user_obj.username, password=password)
 
     if user is None:
         return Response({"error": "Invalid credentials"}, status=401)
 
-    # Check if user is admin
     if not user.is_staff:
         return Response({"error": "Access denied. Admins only."}, status=403)
 
     tokens = get_tokens_for_user(user)
+
     full_name = f"{user.first_name} {user.last_name}".strip()
 
     return Response({
