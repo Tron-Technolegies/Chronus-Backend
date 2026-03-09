@@ -27,21 +27,40 @@ def create_guest(request):
 # ===============================
 # CART HELPERS
 # ===============================
+# def get_cart(request):
+#     if request.user.is_authenticated:
+#         cart, _ = Cart.objects.get_or_create(user=request.user)
+#     else:
+#         guest_id = (
+#             request.headers.get("x-guest-id")
+#             or request.META.get("HTTP_X_GUEST_ID")
+#         )
+#         if not guest_id:
+#             raise Exception("guest_id header required for guest user")
+
+#         cart, _ = Cart.objects.get_or_create(guest_id=guest_id)
+
+#     return cart
+
 def get_cart(request):
     if request.user.is_authenticated:
         cart, _ = Cart.objects.get_or_create(user=request.user)
+
     else:
         guest_id = (
             request.headers.get("x-guest-id")
             or request.META.get("HTTP_X_GUEST_ID")
         )
+
         if not guest_id:
             raise Exception("guest_id header required for guest user")
 
-        cart, _ = Cart.objects.get_or_create(guest_id=guest_id)
+        cart = Cart.objects.filter(guest_id=guest_id).order_by("-id").first()
+
+        if not cart:
+            cart = Cart.objects.create(guest_id=guest_id)
 
     return cart
-
 
 # ===============================
 # CART
@@ -186,60 +205,6 @@ def add_review(request):
     return Response({"message": "Review added"})
 
 
-# ===============================
-# CHECKOUT
-# ===============================
-# @api_view(["POST"])
-# @permission_classes([AllowAny])
-# def checkout(request):
-#     cart = get_cart(request)
-#     items = CartItem.objects.filter(cart=cart)
-
-#     if not items.exists():
-#         return Response({"error": "Cart is empty"}, status=400)
-
-#     total = sum(i.quantity * i.product.price for i in items)
-
-#     guest_id = None
-#     if not request.user.is_authenticated:
-#         # guest_id = request.headers.get("guest_id")
-#         guest_id = request.headers.get("X-Guest-Id")
-#         if not guest_id:
-#             return Response({"error": "guest_id required"}, status=400)
-    
-    
-#     city = request.data.get("city", "")
-#     postal_code = request.data.get("postal_code", "")
-#     country = request.data.get("country", "")
-#     first_name = request.data.get("first_name", "")
-#     last_name = request.data.get("last_name", "")
-
-#     shipping_address = f"{first_name} {last_name}, {city}, {postal_code}, {country}".strip(", ").strip()
-
-#     if not shipping_address:
-#         return Response({"error": "shipping address required"}, status=400)
-
-
-#     order = Order.objects.create(
-#         user=request.user if request.user.is_authenticated else None,
-#         guest_id=guest_id,
-#         email=request.data.get("email"),
-#         phone=request.data.get("phone"),
-#         shipping_address=shipping_address,
-#         total_amount=total,
-#     )
-
-#     for item in items:
-#         OrderItem.objects.create(
-#             order=order,
-#             product=item.product,
-#             quantity=item.quantity,
-#             price=item.product.price
-#         )
-
-#     items.delete()  # clear cart
-
-#     return Response({"order_id": order.id, "amount": total})
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def checkout(request):
