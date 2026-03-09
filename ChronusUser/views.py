@@ -421,59 +421,7 @@ def login(request):
         "tokens": tokens
     })
 
-# @csrf_exempt
-# @require_http_methods(["GET"])
-# def view_products(request):
-#     category = request.GET.get("category")
-#     subcategory = request.GET.get("subcategory")
-#     products = Product.objects.select_related(
-#         "category", "subcategory", "brand"
-#     ).prefetch_related("gallery").all()
 
-#     if category:
-#         if category.isdigit():
-#             products = products.filter(category__id=category)
-#         else:
-#             products = products.filter(category__name__icontains=category)
-
-#     if subcategory:
-#         if subcategory.isdigit():
-#             products = products.filter(subcategory__id=subcategory)
-#         else:
-#             products = products.filter(subcategory__name__icontains=subcategory)
-
-#     data = [
-#         {
-#             "id": product.id,
-#             "name": product.name,
-#             "category": {
-#                 "id": product.category.id,
-#                 "name": product.category.name
-#             } if product.category else None,
-
-#             "subcategory": {
-#                 "id": product.subcategory.id,
-#                 "name": product.subcategory.name
-#             } if getattr(product, "subcategory", None) else None,
-
-#             "brand": {
-#                 "id": product.brand.id,
-#                 "name": product.brand.name
-#             } if product.brand else None,
-
-#             "price": str(product.price),
-#             "description": product.description,
-#             "stock": product.stock,
-#             "image": product.image.url if product.image else None,
-#             "created_at": product.created_at,
-#             "gallery": [img.image.url for img in product.gallery.all()],
-#             "is_featured": product.is_featured,
-#             "is_best_seller": product.is_best_seller
-#         }
-#         for product in products
-#     ]
-
-#     return JsonResponse({"products": data}, status=200)
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_products(request):
@@ -482,10 +430,11 @@ def view_products(request):
 
     products = Product.objects.select_related(
         "category", "subcategory", "brand"
-    ).only(
+    ).prefetch_related("sizes").only(
         "id", "name", "price", "stock",
         "image", "created_at",
         "is_featured", "is_best_seller",
+        "specification",
         "category__id", "category__name",
         "subcategory__id", "subcategory__name",
         "brand__id", "brand__name"
@@ -522,21 +471,31 @@ def view_products(request):
             } if product.brand else None,
             "price": str(product.price),
             "stock": product.stock,
-            # "image": product.image.url if product.image else None,
-            "image": None,
+            "image": product.image.url if product.image else None,
+            # "image": None,
             "created_at": product.created_at,
             "is_featured": product.is_featured,
-            "is_best_seller": product.is_best_seller
+            "is_best_seller": product.is_best_seller,
+            "specification": product.specification,
+            "sizes": [
+                {
+                    "size": s.size,
+                    "price": str(s.price)
+                }
+                for s in product.sizes.all()
+            ]
         })
 
     return JsonResponse({"products": data}, status=200)
+
+
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_single_product(request, product_id):
     try:
         product = Product.objects.select_related(
             "category", "subcategory", "brand"
-        ).prefetch_related("gallery").get(id=product_id)
+        ).prefetch_related("gallery","sizes").get(id=product_id)
         reviews_qs = Review.objects.filter(product=product).order_by("-created_at")
         rating_summary = reviews_qs.aggregate(
             avg_rating=Avg("rating"),
@@ -570,6 +529,15 @@ def view_single_product(request, product_id):
             "is_featured": product.is_featured,
             "is_best_seller": product.is_best_seller,
             "created_at": product.created_at,
+            "specification": product.specification,   
+
+            "sizes": [                                
+                {
+                    "size": s.size,
+                    "price": str(s.price)
+                }
+                for s in product.sizes.all()
+            ],
             "average_rating": round(rating_summary["avg_rating"] or 0, 1),
             "review_count": rating_summary["total_reviews"],
             "reviews": [

@@ -10,7 +10,7 @@ from datetime import datetime
 import cloudinary.uploader
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Category, Brand, Product, Order, Coupon, ProductImage, SubCategory
+from ChronasAdmin.models import Category, Brand, FineArtSize, Product, Order, Coupon, ProductImage, SubCategory
 
 # Create your views here.
 
@@ -68,6 +68,7 @@ def add_category(request):
         name = request.POST.get("name")
         description = request.POST.get("description", "")
         image = request.FILES.get("image")
+        subdescription = request.POST.get("subdescription")
 
         if not name:
             return JsonResponse({"error": "Category name is required"}, status=400)
@@ -75,7 +76,8 @@ def add_category(request):
         category = Category.objects.create(
             name=name,
             description=description,
-            image=image
+            image=image,
+            subdescription=subdescription
         )
 
         return JsonResponse({
@@ -83,33 +85,13 @@ def add_category(request):
             "name": category.name,
             "description": category.description,
             "image": category.image.url if category.image else None,
-            "created_at": category.created_at
+            "created_at": category.created_at,
+            "subdescription": category.subdescription
         }, status=201)
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-
-# @require_http_methods(["GET"])
-# def view_categories(request):
-#     search = request.GET.get("search", "")
-
-#     categories = Category.objects.filter(
-#         Q(name__icontains=search)
-#     ).order_by("-id")
-
-#     data = [
-#         {
-#             "id": category.id,
-#             "name": category.name,
-#             "description": category.description,
-#             "image": category.image.url if category.image else None,
-#             "created_at": category.created_at,
-#             "product_count": category.product_set.count()
-#         }
-#         for category in categories
-#     ]
-#     return JsonResponse({"categories": data}, status=200)
 
 
 from django.db.models import Count
@@ -129,7 +111,8 @@ def view_categories(request):
             "description": category.description,
             "image": category.image.url if category.image else None,
             "created_at": category.created_at,
-            "product_count": category.product_count
+            "product_count": category.product_count,
+            "subdescription": category.subdescription,
         }
         for category in categories
     ]
@@ -145,6 +128,7 @@ def update_category(request, category_id):
         name = request.POST.get("name")
         description = request.POST.get("description")
         image = request.FILES.get("image")
+        subdescription = request.POST.get("subdescription")
 
         if not name:
             return JsonResponse({"error": "Category name is required"}, status=400)
@@ -153,6 +137,9 @@ def update_category(request, category_id):
 
         if description is not None:
             category.description = description
+
+        if subdescription is not None:
+            category.subdescription = subdescription
 
         if image:
             category.image = image
@@ -163,6 +150,7 @@ def update_category(request, category_id):
             "id": category.id,
             "name": category.name,
             "description": category.description,
+            "subdescription": category.subdescription,
             "image": category.image.url if category.image else None,
             "created_at": category.created_at
         })
@@ -335,6 +323,21 @@ def add_products(request):
             is_best_seller=is_best_seller,
             specification=specification
         )
+        sizes = request.POST.get("sizes")
+
+        if sizes:
+            try:
+                sizes = json.loads(sizes)
+
+                for item in sizes:
+                    FineArtSize.objects.create(
+                        product=product,
+                        size=item.get("size"),
+                        price=item.get("price")
+                    )
+
+            except json.JSONDecodeError:
+                return JsonResponse({"error": "Invalid sizes format"}, status=400)
 
         gallery_images = request.FILES.getlist("images")
 
@@ -396,9 +399,16 @@ def view_products(request):
             "gallery": [
                 img.image.url for img in product.gallery.all()
             ],
-            "specification": product.specification,   # ✅ Added
+            "specification": product.specification,   
             "is_featured": product.is_featured,
-            "is_best_seller": product.is_best_seller
+            "is_best_seller": product.is_best_seller,
+            "sizes":[
+                {
+                    "size": s.size,
+                    "price": str(s.price)
+                }
+                for s in product.sizes.all()
+            ]
         }
         for product in products
     ]
@@ -469,6 +479,28 @@ def update_product(request, product_id):
             except json.JSONDecodeError:
                 return JsonResponse({"error": "Invalid specification format"}, status=400)
 
+        
+        
+        sizes = request.POST.get("sizes")
+
+        if sizes:
+            try:
+                sizes = json.loads(sizes)
+
+                # delete old sizes
+                product.sizes.all().delete()
+
+                for item in sizes:
+                    FineArtSize.objects.create(
+                        product=product,
+                        size=item.get("size"),
+                        price=item.get("price")
+                    )
+
+            except json.JSONDecodeError:
+                return JsonResponse({"error": "Invalid sizes format"}, status=400)
+                
+        
         product.save()
 
         gallery_images = request.FILES.getlist("images")
