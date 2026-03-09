@@ -369,11 +369,20 @@ def add_products(request):
             "error": "Something went wrong",
             "details": str(e)
         }, status=500)
+    
 
+from django.core.paginator import Paginator
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_products(request):
-    products = Product.objects.all()
+    page = request.GET.get("page", 1)
+    limit = request.GET.get("limit", 10)
+
+    # products = Product.objects.all()
+    products = Product.objects.order_by("-id")
+    
+    paginator = Paginator(products, limit)
+    page_obj = paginator.get_page(page)
 
     data = [
         {
@@ -410,10 +419,16 @@ def view_products(request):
                 for s in product.sizes.all()
             ]
         }
-        for product in products
+        for product in page_obj
     ]
 
-    return JsonResponse({"products": data}, status=200)
+    return JsonResponse({"products": data,"pagination": {
+            "current_page": page_obj.number,
+            "total_pages": paginator.num_pages,
+            "total_products": paginator.count,
+            "has_next": page_obj.has_next(),
+            "has_previous": page_obj.has_previous()
+        }}, status=200)
 
 import json
 
