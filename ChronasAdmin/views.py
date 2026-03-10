@@ -373,64 +373,102 @@ def add_products(request):
     
 
 from django.core.paginator import Paginator
+from django.db.models import Q
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_products(request):
-    page = request.GET.get("page", 1)
-    limit = request.GET.get("limit", 10)
 
-    # products = Product.objects.all()
-    products = Product.objects.order_by("-id")
-    
-    paginator = Paginator(products, limit)
-    page_obj = paginator.get_page(page)
+    category = request.GET.get("category")
+    subcategory = request.GET.get("subcategory")
+    search = request.GET.get("search")
+    min_price = request.GET.get("min_price")
+    max_price = request.GET.get("max_price")
 
-    data = [
-        {
+    page = int(request.GET.get("page", 1))
+    limit = int(request.GET.get("limit", 12))
+
+    offset = (page - 1) * limit
+
+    products = Product.objects.select_related(
+        "category", "subcategory", "brand"
+    ).prefetch_related("sizes")
+
+    # CATEGORY FILTER
+    if category:
+        if category.isdigit():
+            products = products.filter(category__id=category)
+        else:
+            products = products.filter(category__name__icontains=category)
+
+    # SUBCATEGORY FILTER
+    if subcategory:
+        if subcategory.isdigit():
+            products = products.filter(subcategory__id=subcategory)
+        else:
+            products = products.filter(subcategory__name__icontains=subcategory)
+
+    # SEARCH
+    if search:
+        products = products.filter(
+            Q(name__icontains=search) |
+            Q(brand__name__icontains=search) |
+            Q(category__name__icontains=search) |
+            Q(subcategory__name__icontains=search)
+        )
+
+    # PRICE FILTER
+    if min_price:
+        products = products.filter(price__gte=min_price)
+
+    if max_price:
+        products = products.filter(price__lte=max_price)
+
+    total_products = products.count()
+
+    products = products[offset:offset + limit]
+
+    data = []
+
+    for product in products:
+        data.append({
             "id": product.id,
             "name": product.name,
             "category": {
                 "id": product.category.id,
                 "name": product.category.name
             } if product.category else None,
+            "subcategory": {
+                "id": product.subcategory.id,
+                "name": product.subcategory.name
+            } if product.subcategory else None,
             "brand": {
                 "id": product.brand.id,
                 "name": product.brand.name
             } if product.brand else None,
-            "subcategory": {
-                "id": product.subcategory.id,
-                "name": product.subcategory.name
-            } if getattr(product, "subcategory", None) else None,
             "price": str(product.price),
-            "description": product.description,
             "stock": product.stock,
             "image": product.image.url if product.image else None,
             "created_at": product.created_at,
-            "gallery": [
-                img.image.url for img in product.gallery.all()
-            ],
-            "specification": product.specification,   
             "is_featured": product.is_featured,
             "is_best_seller": product.is_best_seller,
-            "sizes":[
-                {
-                    "size": s.size,
-                    "price": str(s.price)
-                }
+            "specification": product.specification,
+            "sizes": [
+                {"size": s.size, "price": str(s.price)}
                 for s in product.sizes.all()
             ]
-        }
-        for product in page_obj
-    ]
+        })
 
-    return JsonResponse({"products": data,"pagination": {
-            "current_page": page_obj.number,
-            "total_pages": paginator.num_pages,
-            "total_products": paginator.count,
-            "has_next": page_obj.has_next(),
-            "has_previous": page_obj.has_previous()
-        }}, status=200)
-
+    return JsonResponse({
+        "page": page,
+        "limit": limit,
+        "total_products": total_products,
+        "total_pages": (total_products + limit - 1) // limit,
+        "products": data
+    }, status=200)
 import json
 
 @csrf_exempt
