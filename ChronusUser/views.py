@@ -278,8 +278,6 @@ def my_orders(request):
 
     return Response(data)
 
-
-
 class CreatePaymentIntentView(APIView):
     permission_classes = [AllowAny]
 
@@ -290,6 +288,18 @@ class CreatePaymentIntentView(APIView):
                 return Response({"error": "order_id required"}, status=400)
 
             order = Order.objects.get(id=order_id)
+
+            # ✅ SECURITY CHECK
+
+            if request.user.is_authenticated:
+                if order.user != request.user:
+                    return Response({"error": "Unauthorized order access"}, status=403)
+
+            else:
+                guest_id = request.headers.get("X-Guest-Id")
+
+                if not guest_id or order.guest_id != guest_id:
+                    return Response({"error": "Unauthorized guest order"}, status=403)
 
             amount_in_cents = int(float(order.total_amount) * 100)
 
