@@ -256,8 +256,7 @@ def checkout(request):
     ]
     OrderItem.objects.bulk_create(order_items)
 
-    items.delete()
-
+  
     return Response({"order_id": order.id, "amount": total})
 
 # ===============================

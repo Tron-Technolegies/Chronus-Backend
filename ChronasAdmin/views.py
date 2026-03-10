@@ -11,6 +11,7 @@ import cloudinary.uploader
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from ChronasAdmin.models import Category, Brand, FineArtSize, Product, Order, Coupon, ProductImage, SubCategory
+from ChronusUser.models import Cart, CartItem
 
 # Create your views here.
 
@@ -819,11 +820,25 @@ def stripe_webhook(request):
 
         try:
             order = Order.objects.get(id=int(order_id))
+
             order.payment_status = "paid"
             order.payment_id = intent["id"]
             order.status = "processing"
             order.save()
+
             print(f"✅ Order {order_id} marked paid")
+
+            # ✅ CLEAR CART AFTER PAYMENT SUCCESS
+
+            if order.user:
+                cart = Cart.objects.filter(user=order.user).first()
+            else:
+                cart = Cart.objects.filter(guest_id=order.guest_id).first()
+
+            if cart:
+                CartItem.objects.filter(cart=cart).delete()
+                print("🛒 Cart cleared after payment")
+
         except Order.DoesNotExist:
             print(f"❌ Order {order_id} not found")
 
