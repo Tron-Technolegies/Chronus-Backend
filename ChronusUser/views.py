@@ -138,12 +138,12 @@ def remove_from_cart(request, product_id):
     except CartItem.DoesNotExist:
         return Response({"error": "Item not found in cart"}, status=404)
     
-@api_view(["DELETE"])
-@permission_classes([AllowAny])
-def clear_cart(request):
-    cart = get_cart(request)
-    CartItem.objects.filter(cart=cart).delete()
-    return Response({"message": "Cart cleared"})
+# @api_view(["DELETE"])
+# @permission_classes([AllowAny])
+# def clear_cart(request):
+#     cart = get_cart(request)
+#     CartItem.objects.filter(cart=cart).delete()
+#     return Response({"message": "Cart cleared"})
 
 # ===============================
 # WISHLIST
