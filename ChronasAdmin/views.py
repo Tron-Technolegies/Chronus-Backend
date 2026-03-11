@@ -446,7 +446,7 @@ def view_products(request):
     ).prefetch_related(
         "sizes",
         "colors",
-        "productimage_set"
+        "gallery"
     )
 
     # CATEGORY FILTER
@@ -474,16 +474,10 @@ def view_products(request):
 
     # PRICE FILTER
     if min_price:
-        try:
-            products = products.filter(price__gte=float(min_price))
-        except ValueError:
-            return JsonResponse({"error": "Invalid min_price"}, status=400)
+        products = products.filter(price__gte=min_price)
 
     if max_price:
-        try:
-            products = products.filter(price__lte=float(max_price))
-        except ValueError:
-            return JsonResponse({"error": "Invalid max_price"}, status=400)
+        products = products.filter(price__lte=max_price)
 
     total_products = products.count()
 
@@ -527,7 +521,6 @@ def view_products(request):
 
             "specification": product.specification,
 
-            # SIZES
             "sizes": [
                 {
                     "size": s.size,
@@ -536,7 +529,6 @@ def view_products(request):
                 for s in product.sizes.all()
             ],
 
-            # COLORS
             "colors": [
                 {
                     "color_name": c.color_name,
@@ -545,10 +537,9 @@ def view_products(request):
                 for c in product.colors.all()
             ],
 
-            # GALLERY
             "gallery": [
                 img.image.url
-                for img in product.productimage_set.all()
+                for img in product.gallery.all()
                 if img.image
             ]
         })
@@ -560,7 +551,6 @@ def view_products(request):
         "total_pages": (total_products + limit - 1) // limit,
         "products": data
     }, status=200)
-
 @csrf_exempt
 @require_http_methods(["POST"])
 def update_product(request, product_id):
@@ -713,7 +703,7 @@ def update_product(request, product_id):
             "details": str(e)
         }, status=500)
     
-    
+
 @csrf_exempt
 @require_http_methods(["DELETE"])
 def delete_product(request, product_id):
