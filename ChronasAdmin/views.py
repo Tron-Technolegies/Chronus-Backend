@@ -255,11 +255,12 @@ def delete_brand(request, brand_id):
 
     except Brand.DoesNotExist:
         return JsonResponse({"error": "Brand not found"}, status=404)
-    import json
+
+
+import json
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-
 
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -324,6 +325,10 @@ def add_products(request):
             is_best_seller=is_best_seller,
             specification=specification
         )
+
+        # ------------------------
+        # ADD SIZES
+        # ------------------------
         sizes = request.POST.get("sizes")
 
         if sizes:
@@ -340,6 +345,30 @@ def add_products(request):
             except json.JSONDecodeError:
                 return JsonResponse({"error": "Invalid sizes format"}, status=400)
 
+        # ------------------------
+        # ADD COLORS
+        # ------------------------
+        colors = request.POST.get("colors")
+
+        if colors:
+            try:
+                colors = json.loads(colors)
+
+                for index, color in enumerate(colors):
+                    color_image = request.FILES.get(f"color_image_{index}")
+
+                    ProductColor.objects.create(
+                        product=product,
+                        color_name=color.get("color_name"),
+                        image=color_image
+                    )
+
+            except json.JSONDecodeError:
+                return JsonResponse({"error": "Invalid colors format"}, status=400)
+
+        # ------------------------
+        # ADD GALLERY IMAGES
+        # ------------------------
         gallery_images = request.FILES.getlist("images")
 
         for img in gallery_images:
@@ -347,6 +376,19 @@ def add_products(request):
                 product=product,
                 image=img
             )
+
+        # ------------------------
+        # FETCH COLORS FOR RESPONSE
+        # ------------------------
+        colors = ProductColor.objects.filter(product=product)
+
+        color_data = [
+            {
+                "color_name": c.color_name,
+                "image": c.image.url if c.image else None
+            }
+            for c in colors
+        ]
 
         return JsonResponse({
             "id": product.id,
@@ -362,6 +404,7 @@ def add_products(request):
             "stock": product.stock,
             "image": product.image.url if product.image else None,
             "specification": product.specification,
+            "colors": color_data,
             "created_at": product.created_at,
         }, status=201)
 
@@ -372,11 +415,13 @@ def add_products(request):
         }, status=500)
     
 
-from django.core.paginator import Paginator
-from django.db.models import Q
+
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from ChronasAdmin.models import ProductColor
+from django.http import JsonResponse
+from django.db.models import Q
 
 @csrf_exempt
 @require_http_methods(["GET"])
@@ -388,14 +433,21 @@ def view_products(request):
     min_price = request.GET.get("min_price")
     max_price = request.GET.get("max_price")
 
-    page = int(request.GET.get("page", 1))
-    limit = int(request.GET.get("limit", 12))
+    try:
+        page = int(request.GET.get("page", 1))
+        limit = int(request.GET.get("limit", 12))
+    except ValueError:
+        return JsonResponse({"error": "Invalid pagination values"}, status=400)
 
     offset = (page - 1) * limit
 
     products = Product.objects.select_related(
         "category", "subcategory", "brand"
-    ).prefetch_related("sizes")
+    ).prefetch_related(
+        "sizes",
+        "colors",
+        "productimage_set"
+    )
 
     # CATEGORY FILTER
     if category:
@@ -422,10 +474,16 @@ def view_products(request):
 
     # PRICE FILTER
     if min_price:
-        products = products.filter(price__gte=min_price)
+        try:
+            products = products.filter(price__gte=float(min_price))
+        except ValueError:
+            return JsonResponse({"error": "Invalid min_price"}, status=400)
 
     if max_price:
-        products = products.filter(price__lte=max_price)
+        try:
+            products = products.filter(price__lte=float(max_price))
+        except ValueError:
+            return JsonResponse({"error": "Invalid max_price"}, status=400)
 
     total_products = products.count()
 
@@ -434,31 +492,64 @@ def view_products(request):
     data = []
 
     for product in products:
+
         data.append({
             "id": product.id,
+
             "name": product.name,
+
             "category": {
                 "id": product.category.id,
                 "name": product.category.name
             } if product.category else None,
+
             "subcategory": {
                 "id": product.subcategory.id,
                 "name": product.subcategory.name
             } if product.subcategory else None,
+
             "brand": {
                 "id": product.brand.id,
                 "name": product.brand.name
             } if product.brand else None,
+
             "price": str(product.price),
+
             "stock": product.stock,
+
             "image": product.image.url if product.image else None,
+
             "created_at": product.created_at,
+
             "is_featured": product.is_featured,
+
             "is_best_seller": product.is_best_seller,
+
             "specification": product.specification,
+
+            # SIZES
             "sizes": [
-                {"size": s.size, "price": str(s.price)}
+                {
+                    "size": s.size,
+                    "price": str(s.price)
+                }
                 for s in product.sizes.all()
+            ],
+
+            # COLORS
+            "colors": [
+                {
+                    "color_name": c.color_name,
+                    "image": c.image.url if c.image else None
+                }
+                for c in product.colors.all()
+            ],
+
+            # GALLERY
+            "gallery": [
+                img.image.url
+                for img in product.productimage_set.all()
+                if img.image
             ]
         })
 
@@ -469,7 +560,6 @@ def view_products(request):
         "total_pages": (total_products + limit - 1) // limit,
         "products": data
     }, status=200)
-import json
 
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -486,15 +576,18 @@ def update_product(request, product_id):
         image = request.FILES.get("image")
         specification = request.POST.get("specification")
 
+        # NAME
         if name:
             product.name = name
 
+        # CATEGORY
         if category_id:
             category = Category.objects.filter(id=category_id).first()
             if not category:
                 return JsonResponse({"error": "Invalid category"}, status=400)
             product.category = category
 
+        # SUBCATEGORY
         subcategory_id = request.POST.get("subcategory")
 
         if subcategory_id is not None:
@@ -504,28 +597,33 @@ def update_product(request, product_id):
                 subcategory = SubCategory.objects.filter(id=subcategory_id).first()
                 product.subcategory = subcategory
 
+        # BRAND
         if brand_id:
             brand = Brand.objects.filter(id=brand_id).first()
             if not brand:
                 return JsonResponse({"error": "Invalid brand"}, status=400)
             product.brand = brand
 
-        if price:
+        # PRICE
+        if price is not None:
             product.price = price
 
+        # DESCRIPTION
         if description:
             product.description = description
 
-        if stock:
+        # STOCK
+        if stock is not None:
             product.stock = stock
 
+        # MAIN IMAGE
         if image:
             if product.image:
                 cloudinary.uploader.destroy(product.image.public_id)
 
             product.image = image
 
-        # specification update
+        # SPECIFICATION
         if specification:
             try:
                 specification = json.loads(specification)
@@ -533,15 +631,15 @@ def update_product(request, product_id):
             except json.JSONDecodeError:
                 return JsonResponse({"error": "Invalid specification format"}, status=400)
 
-        
-        
+        # ------------------------
+        # UPDATE SIZES
+        # ------------------------
         sizes = request.POST.get("sizes")
 
         if sizes:
             try:
                 sizes = json.loads(sizes)
 
-                # delete old sizes
                 product.sizes.all().delete()
 
                 for item in sizes:
@@ -553,14 +651,41 @@ def update_product(request, product_id):
 
             except json.JSONDecodeError:
                 return JsonResponse({"error": "Invalid sizes format"}, status=400)
-                
-        
+
+        # ------------------------
+        # UPDATE COLORS
+        # ------------------------
+        colors = request.POST.get("colors")
+
+        if colors:
+            try:
+                colors = json.loads(colors)
+
+                product.colors.all().delete()
+
+                for index, color in enumerate(colors):
+
+                    color_image = request.FILES.get(f"color_image_{index}")
+
+                    ProductColor.objects.create(
+                        product=product,
+                        color_name=color.get("color_name"),
+                        image=color_image
+                    )
+
+            except json.JSONDecodeError:
+                return JsonResponse({"error": "Invalid colors format"}, status=400)
+
         product.save()
 
+        # ------------------------
+        # UPDATE GALLERY
+        # ------------------------
         gallery_images = request.FILES.getlist("images")
 
         if gallery_images:
-            # delete old gallery files from cloudinary
+
+            # delete old gallery images from cloudinary
             for img in product.gallery.all():
                 cloudinary.uploader.destroy(img.image.public_id)
 
@@ -568,7 +693,10 @@ def update_product(request, product_id):
 
             # add new images
             for img in gallery_images:
-                ProductImage.objects.create(product=product, image=img)
+                ProductImage.objects.create(
+                    product=product,
+                    image=img
+                )
 
         return JsonResponse({
             "message": "Product updated successfully",
@@ -580,8 +708,12 @@ def update_product(request, product_id):
         return JsonResponse({"error": "Product not found"}, status=404)
 
     except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-
+        return JsonResponse({
+            "error": "Something went wrong",
+            "details": str(e)
+        }, status=500)
+    
+    
 @csrf_exempt
 @require_http_methods(["DELETE"])
 def delete_product(request, product_id):

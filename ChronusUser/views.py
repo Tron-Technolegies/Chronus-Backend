@@ -13,7 +13,7 @@ from django.db.models import Q
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from django.db.models import Avg, Count
-
+from ChronasAdmin.models import ProductColor
 # ===============================
 # GUEST SESSION
 # ===============================
@@ -278,12 +278,18 @@ def my_orders(request):
 
     return Response(data)
 
+
+
+from .currency import convert_amount
+
 class CreatePaymentIntentView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
         try:
             order_id = request.data.get("order_id")
+            currency = request.data.get("currency", "usd").lower()
+            
             if not order_id:
                 return Response({"error": "order_id required"}, status=400)
 
@@ -301,14 +307,17 @@ class CreatePaymentIntentView(APIView):
                 if not guest_id or order.guest_id != guest_id:
                     return Response({"error": "Unauthorized guest order"}, status=403)
 
-            amount_in_cents = int(float(order.total_amount) * 100)
+            # Convert order amount based on selected currency
+            amount_in_cents = convert_amount(order.total_amount, currency)
 
             intent = stripe.PaymentIntent.create(
                 amount=amount_in_cents,
-                currency="usd",
-                payment_method_types=["card"],
+                currency=currency,
+                automatic_payment_methods={"enabled": True},
+                
                 metadata={
                     "order_id": order.id,
+                    "currency": currency,
                     "user_id": request.user.id if request.user.is_authenticated else "",
                     "guest_id": order.guest_id or "",
                 }
@@ -316,11 +325,14 @@ class CreatePaymentIntentView(APIView):
 
             return Response({
                 "client_secret": intent.client_secret,
-                "payment_intent_id": intent.id
+                "payment_intent_id": intent.id,
+                "currency": currency
             })
 
         except Order.DoesNotExist:
             return Response({"error": "Invalid order"}, status=404)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
 # ===============================
 # AUTH (JWT)
 # ===============================
@@ -395,77 +407,10 @@ def login(request):
         "tokens": tokens
     })
 
-
-# @csrf_exempt
-# @require_http_methods(["GET"])
-# def view_products(request):
-#     category = request.GET.get("category")
-#     subcategory = request.GET.get("subcategory")
-
-#     products = Product.objects.select_related(
-#         "category", "subcategory", "brand"
-#     ).prefetch_related("sizes").only(
-#         "id", "name", "price", "stock",
-#         "image", "created_at",
-#         "is_featured", "is_best_seller",
-#         "specification",
-#         "category__id", "category__name",
-#         "subcategory__id", "subcategory__name",
-#         "brand__id", "brand__name"
-#     )
-
-#     if category:
-#         if category.isdigit():
-#             products = products.filter(category__id=category)
-#         else:
-#             products = products.filter(category__name__icontains=category)
-
-#     if subcategory:
-#         if subcategory.isdigit():
-#             products = products.filter(subcategory__id=subcategory)
-#         else:
-#             products = products.filter(subcategory__name__icontains=subcategory)
-
-#     data = []
-#     for product in products:
-#         data.append({
-#             "id": product.id,
-#             "name": product.name,
-#             "category": {
-#                 "id": product.category.id,
-#                 "name": product.category.name
-#             } if product.category else None,
-#             "subcategory": {
-#                 "id": product.subcategory.id,
-#                 "name": product.subcategory.name
-#             } if product.subcategory else None,
-#             "brand": {
-#                 "id": product.brand.id,
-#                 "name": product.brand.name
-#             } if product.brand else None,
-#             "price": str(product.price),
-#             "stock": product.stock,
-#             "image": product.image.url if product.image else None,
-#             # "image": None,
-#             "created_at": product.created_at,
-#             "is_featured": product.is_featured,
-#             "is_best_seller": product.is_best_seller,
-#             "specification": product.specification,
-#             "sizes": [
-#                 {
-#                     "size": s.size,
-#                     "price": str(s.price)
-#                 }
-#                 for s in product.sizes.all()
-#             ]
-#         })
-
-#     return JsonResponse({"products": data}, status=200)
 from django.db.models import Q
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_products(request):
@@ -476,14 +421,21 @@ def view_products(request):
     min_price = request.GET.get("min_price")
     max_price = request.GET.get("max_price")
 
-    page = int(request.GET.get("page", 1))
-    limit = int(request.GET.get("limit", 12))
+    try:
+        page = int(request.GET.get("page", 1))
+        limit = int(request.GET.get("limit", 12))
+    except ValueError:
+        return JsonResponse({"error": "Invalid pagination values"}, status=400)
 
     offset = (page - 1) * limit
 
     products = Product.objects.select_related(
         "category", "subcategory", "brand"
-    ).prefetch_related("sizes")
+    ).prefetch_related(
+        "sizes",
+        "colors",
+        "productimage_set"
+    )
 
     # CATEGORY FILTER
     if category:
@@ -510,10 +462,16 @@ def view_products(request):
 
     # PRICE FILTER
     if min_price:
-        products = products.filter(price__gte=min_price)
+        try:
+            products = products.filter(price__gte=float(min_price))
+        except ValueError:
+            return JsonResponse({"error": "Invalid min_price"}, status=400)
 
     if max_price:
-        products = products.filter(price__lte=max_price)
+        try:
+            products = products.filter(price__lte=float(max_price))
+        except ValueError:
+            return JsonResponse({"error": "Invalid max_price"}, status=400)
 
     total_products = products.count()
 
@@ -522,31 +480,64 @@ def view_products(request):
     data = []
 
     for product in products:
+
         data.append({
             "id": product.id,
+
             "name": product.name,
+
             "category": {
                 "id": product.category.id,
                 "name": product.category.name
             } if product.category else None,
+
             "subcategory": {
                 "id": product.subcategory.id,
                 "name": product.subcategory.name
             } if product.subcategory else None,
+
             "brand": {
                 "id": product.brand.id,
                 "name": product.brand.name
             } if product.brand else None,
+
             "price": str(product.price),
+
             "stock": product.stock,
+
             "image": product.image.url if product.image else None,
+
             "created_at": product.created_at,
+
             "is_featured": product.is_featured,
+
             "is_best_seller": product.is_best_seller,
+
             "specification": product.specification,
+
+            # SIZES
             "sizes": [
-                {"size": s.size, "price": str(s.price)}
+                {
+                    "size": s.size,
+                    "price": str(s.price)
+                }
                 for s in product.sizes.all()
+            ],
+
+            # COLORS
+            "colors": [
+                {
+                    "color_name": c.color_name,
+                    "image": c.image.url if c.image else None
+                }
+                for c in product.colors.all()
+            ],
+
+            # GALLERY
+            "gallery": [
+                img.image.url
+                for img in product.productimage_set.all()
+                if img.image
             ]
         })
 
@@ -557,6 +548,7 @@ def view_products(request):
         "total_pages": (total_products + limit - 1) // limit,
         "products": data
     }, status=200)
+
 
 @csrf_exempt
 @require_http_methods(["GET"])

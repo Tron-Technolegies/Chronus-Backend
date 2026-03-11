@@ -10,7 +10,10 @@ class Category(models.Model):
     subdescription = models.TextField(blank=True)
     image = CloudinaryField("category", blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    priority = models.IntegerField(default=0)
 
+    class Meta:
+        ordering = ['priority']
     def __str__(self):
         return self.name
     
@@ -57,7 +60,13 @@ class Product(models.Model):
     def __str__(self):
         return self.name
 
+class ProductColor(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="colors")
+    color_name = models.CharField(max_length=50)
+    image = CloudinaryField("color_image", blank=True, null=True)
 
+    def __str__(self):
+        return f"{self.product.name} - {self.color_name}"
 
 class FineArtSize(models.Model):
     product = models.ForeignKey(
