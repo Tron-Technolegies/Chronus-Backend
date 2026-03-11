@@ -70,6 +70,12 @@ def add_category(request):
         description = request.POST.get("description", "")
         image = request.FILES.get("image")
         subdescription = request.POST.get("subdescription")
+        # priority (default 0)
+        try:
+            priority = int(request.POST.get("priority", 0))
+        except ValueError:
+            return JsonResponse({"error": "Priority must be a number"}, status=400)
+
 
         if not name:
             return JsonResponse({"error": "Category name is required"}, status=400)
@@ -78,7 +84,8 @@ def add_category(request):
             name=name,
             description=description,
             image=image,
-            subdescription=subdescription
+            subdescription=subdescription,
+            priority=priority
         )
 
         return JsonResponse({
@@ -87,7 +94,8 @@ def add_category(request):
             "description": category.description,
             "image": category.image.url if category.image else None,
             "created_at": category.created_at,
-            "subdescription": category.subdescription
+            "subdescription": category.subdescription,
+            "priority": category.priority
         }, status=201)
 
     except Exception as e:
@@ -128,8 +136,9 @@ def update_category(request, category_id):
 
         name = request.POST.get("name")
         description = request.POST.get("description")
-        image = request.FILES.get("image")
         subdescription = request.POST.get("subdescription")
+        image = request.FILES.get("image")
+        priority = request.POST.get("priority")
 
         if not name:
             return JsonResponse({"error": "Category name is required"}, status=400)
@@ -145,6 +154,13 @@ def update_category(request, category_id):
         if image:
             category.image = image
 
+        # Update priority
+        if priority is not None:
+            try:
+                category.priority = int(priority)
+            except ValueError:
+                return JsonResponse({"error": "Priority must be a number"}, status=400)
+
         category.save()
 
         return JsonResponse({
@@ -152,6 +168,7 @@ def update_category(request, category_id):
             "name": category.name,
             "description": category.description,
             "subdescription": category.subdescription,
+            "priority": category.priority,
             "image": category.image.url if category.image else None,
             "created_at": category.created_at
         })
@@ -159,6 +176,8 @@ def update_category(request, category_id):
     except Category.DoesNotExist:
         return JsonResponse({"error": "Category not found"}, status=404)
 
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
 @csrf_exempt
 @require_http_methods(["DELETE"])
 def delete_category(request, category_id):
