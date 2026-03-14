@@ -669,7 +669,7 @@ def view_categories(request):
 
     categories = Category.objects.filter(
         Q(name__icontains=search)
-    ).order_by("-id")
+    ).order_by("priority")
 
     data = [
         {
