@@ -745,13 +745,43 @@ def delete_product(request, product_id):
         return JsonResponse({"error": "Product not found"}, status=404)
     
 
+# @require_http_methods(["GET"])
+# def view_orders(request):
+#     orders = Order.objects.prefetch_related("items", "user").all()
+
+#     data = []
+
+#     for order in orders:
+#         data.append({
+#             "id": order.id,
+#             "user": order.user.username if order.user else "Guest",
+#             "email": order.email,
+#             "phone": order.phone,
+#             "status": order.status,
+#             "tracking_link": order.tracking_link,
+#             "shipped_at": order.shipped_at,
+#             "total_amount": str(order.total_amount),
+#             "created_at": order.created_at,
+#         })
+
+#     return JsonResponse({"orders": data}, status=200)
 @require_http_methods(["GET"])
 def view_orders(request):
-    orders = Order.objects.prefetch_related("items", "user").all()
+
+    orders = Order.objects.prefetch_related("items__product").all()
 
     data = []
 
     for order in orders:
+
+        items = []
+        for item in order.items.all():
+            items.append({
+                "product_name": item.product.name,
+                "quantity": item.quantity,
+                "price": str(item.price),
+            })
+
         data.append({
             "id": order.id,
             "user": order.user.username if order.user else "Guest",
@@ -762,10 +792,10 @@ def view_orders(request):
             "shipped_at": order.shipped_at,
             "total_amount": str(order.total_amount),
             "created_at": order.created_at,
+            "items": items
         })
 
     return JsonResponse({"orders": data}, status=200)
-
 from django.utils import timezone
 
 @require_http_methods(["POST"])

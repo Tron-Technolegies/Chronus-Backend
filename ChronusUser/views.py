@@ -262,23 +262,49 @@ def checkout(request):
 # ===============================
 # USER ORDERS (AUTH)
 # ===============================
+# @api_view(["GET"])
+# @permission_classes([IsAuthenticated])
+# def my_orders(request):
+#     orders = Order.objects.filter(user=request.user)
+
+#     data = [
+#         {
+#             "id": o.id,
+#             "total": o.total_amount,
+#             "status": o.status
+#         }
+#         for o in orders
+#     ]
+
+#     return Response(data)
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def my_orders(request):
-    orders = Order.objects.filter(user=request.user)
 
-    data = [
-        {
-            "id": o.id,
-            "total": o.total_amount,
-            "status": o.status
-        }
-        for o in orders
-    ]
+    orders = Order.objects.prefetch_related("items__product").filter(user=request.user)
 
-    return Response(data)
+    data = []
 
+    for order in orders:
 
+        items = []
+        for item in order.items.all():
+            items.append({
+                "product_name": item.product.name,
+                "quantity": item.quantity,
+                "price": str(item.price),
+            })
+
+        data.append({
+            "id": order.id,
+            "status": order.status,
+            "total_amount": str(order.total_amount),
+            "created_at": order.created_at,
+            "items": items
+        })
+
+    return Response({"orders": data})
 
 from .currency import convert_amount
 
