@@ -678,7 +678,8 @@ def view_categories(request):
             "description":category.description,
             "image": category.image.url if category.image else None,
             "created_at": category.created_at,
-            "priority":category.priority
+            "priority":category.priority,
+            "subdescription": category.subdescription
         }
         for category in categories
     ]
