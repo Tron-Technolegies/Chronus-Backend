@@ -122,6 +122,7 @@ def view_categories(request):
             "created_at": category.created_at,
             "product_count": category.product_count,
             "subdescription": category.subdescription,
+            "priority":category.priority
         }
         for category in categories
     ]
