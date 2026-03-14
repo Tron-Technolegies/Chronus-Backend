@@ -191,4 +191,7 @@ DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET=env("STRIPE_WEBHOOK_SECRET")
 
+
+ZIINA_API_KEY = os.getenv("ZIINA_API_KEY")
+
 test ='test'

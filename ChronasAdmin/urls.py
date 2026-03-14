@@ -34,5 +34,6 @@ urlpatterns = [
     path("subcategories/", views.list_subcategories, name='subcategories'),
     path("subcategories/<int:pk>/update/", views.update_subcategory, name='update_subcategory'),
     path("subcategories/<int:pk>/delete/", views.delete_subcategory, name='delete_subcategory'),
+    path("payments/ziina/webhook/", views.ziina_webhook, name='ziina_webhook')
 
 ]

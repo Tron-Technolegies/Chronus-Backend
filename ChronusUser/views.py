@@ -708,3 +708,64 @@ def apply_coupon(request):
         "new_total": order.total_amount,
         "discount": order.discount_amount
     })
+
+
+import requests
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+from django.conf import settings
+from ChronasAdmin.models import Order
+
+class CreateZiinaPayment(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        try:
+            order_id = request.data.get("order_id")
+
+            if not order_id:
+                return Response({"error": "order_id required"}, status=400)
+
+            order = Order.objects.get(id=order_id)
+
+            # same security logic you used
+            if request.user.is_authenticated:
+                if order.user != request.user:
+                    return Response({"error": "Unauthorized order access"}, status=403)
+
+            else:
+                guest_id = request.headers.get("X-Guest-Id")
+
+                if not guest_id or order.guest_id != guest_id:
+                    return Response({"error": "Unauthorized guest order"}, status=403)
+
+            url = "https://api-v2.ziina.com/api/payment_intent"
+
+            headers = {
+                "Authorization": f"Bearer {settings.ZIINA_API_KEY}",
+                "Content-Type": "application/json"
+            }
+
+            payload = {
+                "amount": int(order.total_amount * 100),
+                "currency_code": "AED",
+                "message": f"Order {order.id}",
+                "metadata": {
+                    "order_id": str(order.id)
+                }
+            }
+
+            response = requests.post(url, json=payload, headers=headers)
+
+            data = response.json()
+
+            return Response({
+                "payment_url": data.get("redirect_url")
+            })
+
+        except Order.DoesNotExist:
+            return Response({"error": "Invalid order"}, status=404)
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)

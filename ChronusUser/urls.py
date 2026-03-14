@@ -32,5 +32,5 @@ urlpatterns = [
     path('view_categories/', views.view_categories, name='view_categories'),
     path('view_coupons/', views.view_coupons, name='view_coupons'),
     path("subcategories/", views.list_subcategories, name='subcategories'),
-
+    path("payments/ziina/create/", views.CreateZiinaPayment.as_view(), name='ziina-payment-intent')
 ]

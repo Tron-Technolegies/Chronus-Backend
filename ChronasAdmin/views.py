@@ -111,7 +111,7 @@ def view_categories(request):
 
     categories = Category.objects.filter(
         Q(name__icontains=search)
-    ).annotate(product_count=Count("product")).order_by("-id")
+    ).annotate(product_count=Count("product")).order_by("priority")
 
     data = [
         {
@@ -899,73 +899,12 @@ def delete_coupon(request, coupon_id):
 
 
 from django.http import HttpResponse
-import stripe
-from django.conf import settings
-
-stripe.api_key = settings.STRIPE_SECRET_KEY
-
-
-# @csrf_exempt
-# def stripe_webhook(request):
-#     print("🔔 Stripe webhook called")
-
-#     payload = request.body
-#     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
-
-#     try:
-#         event = stripe.Webhook.construct_event(
-#             payload,
-#             sig_header,
-#             settings.STRIPE_WEBHOOK_SECRET
-#         )
-#     except Exception:
-#         return HttpResponse(status=400)
-
-#     print("Stripe Event:", event["type"])
-#     return HttpResponse(status=200)
-
-from django.http import HttpResponse
 from ChronasAdmin.models import Order
 import stripe
 from django.conf import settings
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
-
-# @csrf_exempt
-# def stripe_webhook(request):
-#     payload = request.body
-#     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
-
-#     try:
-#         event = stripe.Webhook.construct_event(
-#             payload,
-#             sig_header,
-#             settings.STRIPE_WEBHOOK_SECRET
-#         )
-#     except stripe.error.SignatureVerificationError:
-#         return HttpResponse(status=400)
-#     except Exception:
-#         return HttpResponse(status=400)
-
-#     # ✅ handle successful payment
-#     if event["type"] == "payment_intent.succeeded":
-#         intent = event["data"]["object"]
-
-#         order_id = intent["metadata"].get("order_id")
-#         payment_id = intent["id"]
-
-#         try:
-#             order = Order.objects.get(id=order_id)
-#             order.payment_status = "paid"
-#             order.payment_id = payment_id
-#             order.status = "processing"
-#             order.save()
-#             print(f" Order {order_id} marked paid")
-#         except Order.DoesNotExist:
-#             print(f" Order {order_id} not found")
-
-#     return HttpResponse(status=200)
 
 @csrf_exempt
 def stripe_webhook(request):
@@ -1295,3 +1234,33 @@ def admin_login(request):
         "full_name": full_name,
         "tokens": tokens
     })
+
+
+@csrf_exempt
+def ziina_webhook(request):
+    data = json.loads(request.body)
+    
+    print("Ziina Webhook Data:", data)
+
+    event_type = data.get("event")
+
+    if event_type == "payment_intent.succeeded":
+
+        data = data.get("data", {})
+        metadata = data.get("metadata", {})
+        order_id = metadata.get("order_id")
+
+        try:
+            order = Order.objects.get(id=order_id)
+
+            order.payment_status = "paid"
+            order.payment_id = data.get("id")
+            order.status = "processing"
+            order.save()
+
+            print(f"Ziina order {order_id} paid")
+
+        except Order.DoesNotExist:
+            print("Order not found")
+
+    return HttpResponse(status=200)
