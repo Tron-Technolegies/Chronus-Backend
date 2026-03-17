@@ -14,6 +14,7 @@ from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from django.db.models import Avg, Count
 from ChronasAdmin.models import ProductColor
+from ChronasAdmin.models import FineArtSize, Frame, Material
 # ===============================
 # GUEST SESSION
 # ===============================
@@ -23,24 +24,6 @@ def create_guest(request):
     guest = GuestSession.objects.create()
     return Response({"guest_id": str(guest.guest_id)})
 
-
-# ===============================
-# CART HELPERS
-# ===============================
-# def get_cart(request):
-#     if request.user.is_authenticated:
-#         cart, _ = Cart.objects.get_or_create(user=request.user)
-#     else:
-#         guest_id = (
-#             request.headers.get("x-guest-id")
-#             or request.META.get("HTTP_X_GUEST_ID")
-#         )
-#         if not guest_id:
-#             raise Exception("guest_id header required for guest user")
-
-#         cart, _ = Cart.objects.get_or_create(guest_id=guest_id)
-
-#     return cart
 
 def get_cart(request):
     if request.user.is_authenticated:
@@ -70,6 +53,9 @@ def get_cart(request):
 def add_to_cart(request):
     product_id = request.data.get("product_id")
     qty = int(request.data.get("quantity", 1))
+    size_id = request.data.get("size_id")
+    frame_id = request.data.get("frame_id")
+    material_id = request.data.get("material_id")
 
     if not product_id:
         return Response({"error": "product_id required"}, status=400)
@@ -79,13 +65,36 @@ def add_to_cart(request):
 
     cart = get_cart(request)
     product = get_object_or_404(Product, id=product_id)
+    size = None
+    frame = None
+    material = None
 
-    item, created = CartItem.objects.get_or_create(cart=cart, product=product)
+    price = product.price
+    # if fine art options exist
+    if size_id:
+        size = get_object_or_404(FineArtSize, id=size_id)
+        price = size.price
+
+    if frame_id:
+        frame = get_object_or_404(Frame, id=frame_id)
+        price += frame.extra_price
+
+    if material_id:
+        material = get_object_or_404(Material, id=material_id)
+        price += material.extra_price
+
+    item, created = CartItem.objects.get_or_create(
+        cart=cart, 
+        product=product,
+        size=size,
+        frame=frame,
+        material=material)
 
     if not created:
         item.quantity += qty
     else:
         item.quantity = qty
+        item.price = price
 
     item.save()
 
@@ -109,13 +118,18 @@ def view_cart(request):
     data = []
 
     for item in items:
-        total = item.quantity * item.product.price
+        # total = item.quantity * item.product.price
+        total = item.quantity * item.price
         subtotal += total
 
         data.append({
             "product_id": item.product.id,
             "product": item.product.name,
-            "price": item.product.price,
+            # "price": item.product.price,
+            "price": item.price,
+            "size": item.size.size if item.size else None,
+            "frame": item.frame.name if item.frame else None,
+            "material": item.material.name if item.material else None,
             "image": item.product.image.url if item.product.image else None,
             "quantity": item.quantity,
             "total": total
@@ -128,22 +142,25 @@ def view_cart(request):
 
 @api_view(["DELETE"])
 @permission_classes([AllowAny])
-def remove_from_cart(request, product_id):
+def remove_from_cart(request, item_id):
     cart = get_cart(request)
 
     try:
-        item = CartItem.objects.get(cart=cart, product_id=product_id)
+        item = CartItem.objects.get(id=item_id, cart=cart)
         item.delete()
         return Response({"message": "Item removed"})
     except CartItem.DoesNotExist:
-        return Response({"error": "Item not found in cart"}, status=404)
-    
-# @api_view(["DELETE"])
-# @permission_classes([AllowAny])
-# def clear_cart(request):
+        return Response({"error": "Item not found"}, status=404)
+# def remove_from_cart(request, product_id):
 #     cart = get_cart(request)
-#     CartItem.objects.filter(cart=cart).delete()
-#     return Response({"message": "Cart cleared"})
+
+#     try:
+#         item = CartItem.objects.get(cart=cart, product_id=product_id)
+#         item.delete()
+#         return Response({"message": "Item removed"})
+#     except CartItem.DoesNotExist:
+#         return Response({"error": "Item not found in cart"}, status=404)
+    
 
 # ===============================
 # WISHLIST
@@ -217,7 +234,8 @@ def checkout(request):
 
     total = 0
     for i in items:
-        total += i.quantity * i.product.price
+        # total += i.quantity * i.product.price
+        total += i.quantity * i.price
 
     guest_id = None
     if not request.user.is_authenticated:
@@ -250,7 +268,8 @@ def checkout(request):
             order=order,
             product=i.product,
             quantity=i.quantity,
-            price=i.product.price
+            # price=i.product.price
+            price=i.price
         )
         for i in items
     ]
@@ -262,21 +281,6 @@ def checkout(request):
 # ===============================
 # USER ORDERS (AUTH)
 # ===============================
-# @api_view(["GET"])
-# @permission_classes([IsAuthenticated])
-# def my_orders(request):
-#     orders = Order.objects.filter(user=request.user)
-
-#     data = [
-#         {
-#             "id": o.id,
-#             "total": o.total_amount,
-#             "status": o.status
-#         }
-#         for o in orders
-#     ]
-
-#     return Response(data)
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -797,3 +801,26 @@ class CreateZiinaPayment(APIView):
 
         except Exception as e:
             return Response({"error": str(e)}, status=500)
+        
+
+
+# user/views.py
+
+from django.http import JsonResponse
+from .models import FineArtSize, Frame, Material
+
+def calculate_price(request):
+
+    size_id = request.GET.get("size")
+    frame_id = request.GET.get("frame")
+    material_id = request.GET.get("material")
+
+    size = FineArtSize.objects.get(id=size_id)
+    frame = Frame.objects.get(id=frame_id)
+    material = Material.objects.get(id=material_id)
+
+    price = size.price + frame.extra_price + material.extra_price
+
+    return JsonResponse({
+        "price": price
+    })

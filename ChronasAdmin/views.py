@@ -1295,3 +1295,172 @@ def ziina_webhook(request):
             print("Order not found")
 
     return HttpResponse(status=200)
+
+from django.http import JsonResponse
+from django.views.decorators.http import require_http_methods
+from .models import Frame, Material, ProductVariant
+
+
+# ---------------- FRAME ---------------- #
+
+@require_http_methods(["POST"])
+def create_frame(request):
+
+    name = request.POST.get("name")
+    extra_price = request.POST.get("extra_price", 0)
+    image = request.FILES.get("image")
+
+    frame = Frame.objects.create(
+        name=name,
+        extra_price=extra_price,
+        image=image
+    )
+
+    return JsonResponse({
+        "message": "Frame created",
+        "id": frame.id
+    })
+
+@require_http_methods(["GET"])
+def list_frames(request):
+
+    frames = Frame.objects.all()
+
+    data = []
+
+    for frame in frames:
+        data.append({
+            "id": frame.id,
+            "name": frame.name,
+            "extra_price": frame.extra_price,
+            "image": frame.image.url if frame.image else None
+        })
+
+    return JsonResponse(data, safe=False)
+
+
+@require_http_methods(["PUT"])
+def update_frame(request, frame_id):
+
+    try:
+        frame = Frame.objects.get(id=frame_id)
+
+        name = request.POST.get("name")
+        extra_price = request.POST.get("extra_price")
+        image = request.FILES.get("image")
+
+        if name:
+            frame.name = name
+
+        if extra_price:
+            frame.extra_price = extra_price
+
+        if image:
+            frame.image = image
+
+        frame.save()
+
+        return JsonResponse({
+            "message": "Frame updated successfully"
+        })
+
+    except Frame.DoesNotExist:
+        return JsonResponse({
+            "error": "Frame not found"
+        }, status=404)
+
+
+@require_http_methods(["DELETE"])
+def delete_frame(request, frame_id):
+
+    try:
+        frame = Frame.objects.get(id=frame_id)
+        frame.delete()
+
+        return JsonResponse({"message": "Frame deleted"})
+
+    except Frame.DoesNotExist:
+        return JsonResponse({"error": "Frame not found"}, status=404)
+
+
+# ---------------- MATERIAL ---------------- #
+@require_http_methods(["POST"])
+def create_material(request):
+
+    name = request.POST.get("name")
+    description = request.POST.get("description")
+    extra_price = request.POST.get("extra_price", 0)
+
+    material = Material.objects.create(
+        name=name,
+        description=description,
+        extra_price=extra_price
+    )
+
+    return JsonResponse({
+        "message": "Material created",
+        "id": material.id
+    })
+
+
+@require_http_methods(["GET"])
+def list_materials(request):
+
+    materials = Material.objects.all()
+
+    data = [
+        {
+            "id": material.id,
+            "name": material.name,
+            "description": material.description,
+            "extra_price": material.extra_price
+        }
+        for material in materials
+    ]
+
+    return JsonResponse(data, safe=False)
+
+@require_http_methods(["PUT"])
+def update_material(request, material_id):
+
+    try:
+        material = Material.objects.get(id=material_id)
+
+        name = request.POST.get("name")
+        description = request.POST.get("description")
+        extra_price = request.POST.get("extra_price")
+
+        if name:
+            material.name = name
+
+        if description:
+            material.description = description
+
+        if extra_price:
+            material.extra_price = extra_price
+
+        material.save()
+
+        return JsonResponse({
+            "message": "Material updated successfully"
+        })
+
+    except Material.DoesNotExist:
+        return JsonResponse({
+            "error": "Material not found"
+        }, status=404)
+
+
+@require_http_methods(["DELETE"])
+def delete_material(request, material_id):
+
+    try:
+        material = Material.objects.get(id=material_id)
+
+        material.delete()
+
+        return JsonResponse({"message": "Material deleted"})
+
+    except Material.DoesNotExist:
+        return JsonResponse({"error": "Material not found"}, status=404)
+

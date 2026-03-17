@@ -34,6 +34,21 @@ urlpatterns = [
     path("subcategories/", views.list_subcategories, name='subcategories'),
     path("subcategories/<int:pk>/update/", views.update_subcategory, name='update_subcategory'),
     path("subcategories/<int:pk>/delete/", views.delete_subcategory, name='delete_subcategory'),
-    path("payments/ziina/webhook/", views.ziina_webhook, name='ziina_webhook')
+    path("payments/ziina/webhook/", views.ziina_webhook, name='ziina_webhook'),
+    
+    # FRAME
+    path("frames/create/", views.create_frame, name="create_frame"),
+    path("frames/", views.list_frames, name="list_frames"),
+    path("frames/update/<int:frame_id>/", views.update_frame, name="update_frame"),
+    path("frames/delete/<int:frame_id>/", views.delete_frame, name="delete_frame"),
+
+    # MATERIAL
+    path("materials/create/", views.create_material, name="create_material"),
+    path("materials/", views.list_materials, name="list_materials"),
+    path("materials/update/<int:material_id>/", views.update_material, name="update_material"),
+    path("materials/delete/<int:material_id>/", views.delete_material, name="delete_material"),
+
+    # VARIANT
+    path("variants/create/", views.create_variant, name="create_variant"),
 
 ]

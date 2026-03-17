@@ -76,7 +76,6 @@ class FineArtSize(models.Model):
     )
     size = models.CharField(max_length=50)   # e.g. 12x18
     price = models.DecimalField(max_digits=10, decimal_places=2)
-
     def __str__(self):
         return f"{self.product.name} - {self.size}"
 
@@ -141,3 +140,20 @@ class Coupon(models.Model):
 
     def __str__(self):
         return self.code
+
+
+class Frame(models.Model):
+    name = models.CharField(max_length=50)   # Black, Gold, Silver
+    image = CloudinaryField("frame_image", blank=True, null=True)
+    extra_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    def __str__(self):
+        return self.name
+    
+
+class Material(models.Model):
+    name = models.CharField(max_length=50)   # Premium Canvas / Acrylic Glass
+    description = models.TextField(blank=True)
+    extra_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    def __str__(self):
+        return self.name
+
