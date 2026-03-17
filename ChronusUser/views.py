@@ -807,7 +807,7 @@ class CreateZiinaPayment(APIView):
 # user/views.py
 
 from django.http import JsonResponse
-from .models import FineArtSize, Frame, Material
+from ChronasAdmin.models import FineArtSize, Frame, Material
 
 def calculate_price(request):
 

@@ -48,7 +48,6 @@ urlpatterns = [
     path("materials/update/<int:material_id>/", views.update_material, name="update_material"),
     path("materials/delete/<int:material_id>/", views.delete_material, name="delete_material"),
 
-    # VARIANT
-    path("variants/create/", views.create_variant, name="create_variant"),
+
 
 ]
