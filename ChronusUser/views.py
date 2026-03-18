@@ -52,10 +52,14 @@ def get_cart(request):
 @permission_classes([AllowAny])
 def add_to_cart(request):
     product_id = request.data.get("product_id")
-    qty = int(request.data.get("quantity", 1))
     size_id = request.data.get("size_id")
     frame_id = request.data.get("frame_id")
     material_id = request.data.get("material_id")
+
+    try:
+        qty = int(request.data.get("quantity", 1))
+    except (TypeError, ValueError):
+        return Response({"error": "Invalid quantity"}, status=400)
 
     if not product_id:
         return Response({"error": "product_id required"}, status=400)
@@ -65,38 +69,44 @@ def add_to_cart(request):
 
     cart = get_cart(request)
     product = get_object_or_404(Product, id=product_id)
+
     size = None
     frame = None
     material = None
 
     price = product.price
-    # if fine art options exist
+
+    # product-specific size
     if size_id:
-        size = get_object_or_404(FineArtSize, id=size_id)
+        size = get_object_or_404(FineArtSize, id=size_id, product=product)
         price = size.price
 
+    # only allow frames linked to this product
     if frame_id:
-        frame = get_object_or_404(Frame, id=frame_id)
+        frame = get_object_or_404(Frame, id=frame_id, products=product)
         price += frame.extra_price
 
+    # only allow materials linked to this product
     if material_id:
-        material = get_object_or_404(Material, id=material_id)
+        material = get_object_or_404(Material, id=material_id, products=product)
         price += material.extra_price
 
     item, created = CartItem.objects.get_or_create(
-        cart=cart, 
+        cart=cart,
         product=product,
         size=size,
         frame=frame,
-        material=material)
+        material=material,
+        defaults={
+            "quantity": qty,
+            "price": price
+        }
+    )
 
     if not created:
         item.quantity += qty
-    else:
-        item.quantity = qty
         item.price = price
-
-    item.save()
+        item.save()
 
     return Response({"message": "Added to cart"})
 
@@ -105,27 +115,22 @@ def add_to_cart(request):
 @permission_classes([AllowAny])
 def view_cart(request):
     cart = get_cart(request)
-    # items = CartItem.objects.select_related("product").filter(cart=cart)
-    items = CartItem.objects.select_related("product").only(
-    "quantity",
-    "product__id",
-    "product__name",
-    "product__price",
-    "product__image"
-).filter(cart=cart)
-    subtotal = 0
 
+    items = CartItem.objects.select_related(
+        "product", "size", "frame", "material"
+    ).filter(cart=cart)
+
+    subtotal = 0
     data = []
 
     for item in items:
-        # total = item.quantity * item.product.price
         total = item.quantity * item.price
         subtotal += total
 
         data.append({
+            "id": item.id,
             "product_id": item.product.id,
             "product": item.product.name,
-            # "price": item.product.price,
             "price": item.price,
             "size": item.size.size if item.size else None,
             "frame": item.frame.name if item.frame else None,
@@ -139,6 +144,104 @@ def view_cart(request):
         "items": data,
         "subtotal": subtotal
     })
+
+
+# @api_view(["POST"])
+# @permission_classes([AllowAny])
+# def add_to_cart(request):
+#     product_id = request.data.get("product_id")
+#     qty = int(request.data.get("quantity", 1))
+#     size_id = request.data.get("size_id")
+#     frame_id = request.data.get("frame_id")
+#     material_id = request.data.get("material_id")
+
+#     if not product_id:
+#         return Response({"error": "product_id required"}, status=400)
+
+#     if qty <= 0:
+#         return Response({"error": "Invalid quantity"}, status=400)
+
+#     cart = get_cart(request)
+#     product = get_object_or_404(Product, id=product_id)
+#     size = None
+#     frame = None
+#     material = None
+
+#     price = product.price
+#     # if fine art options exist
+#     if size_id:
+#         size = get_object_or_404(FineArtSize, id=size_id)
+#         price = size.price
+
+#     if frame_id:
+#         frame = get_object_or_404(Frame, id=frame_id)
+#         price += frame.extra_price
+
+#     if material_id:
+#         material = get_object_or_404(Material, id=material_id)
+#         price += material.extra_price
+
+#     item, created = CartItem.objects.get_or_create(
+#         cart=cart, 
+#         product=product,
+#         size=size,
+#         frame=frame,
+#         material=material,
+#         defaults={
+#             "quantity": qty,
+#             "price": price
+#         })
+
+#     # if not created:
+#     #     item.quantity += qty
+#     # else:
+#     #     item.quantity = qty
+#     #     item.price = price
+#     if not created:
+#             item.quantity += qty
+#             item.price = price
+#             item.save()
+
+
+#     # item.save()
+
+#     return Response({"message": "Added to cart"})
+
+
+# @api_view(["GET"])
+# @permission_classes([AllowAny])
+# def view_cart(request):
+#     cart = get_cart(request)
+#     # items = CartItem.objects.select_related("product").filter(cart=cart)
+#     items = CartItem.objects.select_related(
+#     "product", "size", "frame", "material"
+# ).filter(cart=cart)
+#     subtotal = 0
+
+#     data = []
+
+#     for item in items:
+#         # total = item.quantity * item.product.price
+#         total = item.quantity * item.price
+#         subtotal += total
+
+#         data.append({
+#             "product_id": item.product.id,
+#             "product": item.product.name,
+#             # "price": item.product.price,
+#             "price": item.price,
+#             "size": item.size.size if item.size else None,
+#             "frame": item.frame.name if item.frame else None,
+#             "material": item.material.name if item.material else None,
+#             "image": item.product.image.url if item.product.image else None,
+#             "quantity": item.quantity,
+#             "total": total
+#         })
+
+#     return Response({
+#         "items": data,
+#         "subtotal": subtotal
+#     })
 
 @api_view(["DELETE"])
 @permission_classes([AllowAny])
@@ -222,19 +325,75 @@ def add_review(request):
     return Response({"message": "Review added"})
 
 
+# @api_view(["POST"])
+# @permission_classes([AllowAny])
+# def checkout(request):
+#     cart = get_cart(request)
+
+#     items = CartItem.objects.select_related("product").filter(cart=cart)
+
+#     if not items.exists():
+#         return Response({"error": "Cart is empty"}, status=400)
+
+#     total = 0
+#     for i in items:
+#         # total += i.quantity * i.product.price
+#         total += i.quantity * i.price
+
+#     guest_id = None
+#     if not request.user.is_authenticated:
+#         guest_id = request.headers.get("X-Guest-Id")
+#         if not guest_id:
+#             return Response({"error": "guest_id required"}, status=400)
+
+#     city = request.data.get("city", "")
+#     postal_code = request.data.get("postal_code", "")
+#     country = request.data.get("country", "")
+#     first_name = request.data.get("first_name", "")
+#     last_name = request.data.get("last_name", "")
+
+#     shipping_address = f"{first_name} {last_name}, {city}, {postal_code}, {country}".strip(", ").strip()
+
+#     if not shipping_address:
+#         return Response({"error": "shipping address required"}, status=400)
+
+#     order = Order.objects.create(
+#         user=request.user if request.user.is_authenticated else None,
+#         guest_id=guest_id,
+#         email=request.data.get("email"),
+#         phone=request.data.get("phone"),
+#         shipping_address=shipping_address,
+#         total_amount=total,
+#     )
+
+#     order_items = [
+#         OrderItem(
+#             order=order,
+#             product=i.product,
+#             quantity=i.quantity,
+#             # price=i.product.price
+#             price=i.price
+#         )
+#         for i in items
+#     ]
+#     OrderItem.objects.bulk_create(order_items)
+
+  
+#     return Response({"order_id": order.id, "amount": total})
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def checkout(request):
     cart = get_cart(request)
 
-    items = CartItem.objects.select_related("product").filter(cart=cart)
+    items = CartItem.objects.select_related(
+        "product", "size", "frame", "material"
+    ).filter(cart=cart)
 
     if not items.exists():
         return Response({"error": "Cart is empty"}, status=400)
 
     total = 0
     for i in items:
-        # total += i.quantity * i.product.price
         total += i.quantity * i.price
 
     guest_id = None
@@ -267,17 +426,17 @@ def checkout(request):
         OrderItem(
             order=order,
             product=i.product,
+            size=i.size,
+            frame=i.frame,
+            material=i.material,
             quantity=i.quantity,
-            # price=i.product.price
             price=i.price
         )
         for i in items
     ]
     OrderItem.objects.bulk_create(order_items)
 
-  
     return Response({"order_id": order.id, "amount": total})
-
 # ===============================
 # USER ORDERS (AUTH)
 # ===============================

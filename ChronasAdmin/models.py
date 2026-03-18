@@ -30,6 +30,20 @@ class Brand(models.Model):
 
     def __str__(self):
         return self.name
+class Frame(models.Model):
+    name = models.CharField(max_length=50)   # Black, Gold, Silver
+    image = CloudinaryField("frame_image", blank=True, null=True)
+    extra_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    def __str__(self):
+        return self.name
+    
+
+class Material(models.Model):
+    name = models.CharField(max_length=50)   # Premium Canvas / Acrylic Glass
+    description = models.TextField(blank=True)
+    extra_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    def __str__(self):
+        return self.name
 
 
 class Product(models.Model):
@@ -56,6 +70,8 @@ class Product(models.Model):
     is_featured = models.BooleanField(default=False)
     is_best_seller = models.BooleanField(default=False)
     specification = models.JSONField(blank=True, null=True)
+    frames = models.ManyToManyField(Frame, blank=True, related_name="products")
+    materials = models.ManyToManyField(Material, blank=True, related_name="products")
 
     def __str__(self):
         return self.name
@@ -128,7 +144,9 @@ class OrderItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True)
     quantity = models.PositiveIntegerField(default=1)
     price = models.DecimalField(max_digits=10, decimal_places=2)
-
+    size = models.ForeignKey(FineArtSize, on_delete=models.SET_NULL, null=True, blank=True)
+    frame = models.ForeignKey(Frame, on_delete=models.SET_NULL, null=True, blank=True)
+    material = models.ForeignKey(Material, on_delete=models.SET_NULL, null=True, blank=True)
     def get_total_price(self):
         return self.quantity * self.price
     
@@ -142,18 +160,4 @@ class Coupon(models.Model):
         return self.code
 
 
-class Frame(models.Model):
-    name = models.CharField(max_length=50)   # Black, Gold, Silver
-    image = CloudinaryField("frame_image", blank=True, null=True)
-    extra_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    def __str__(self):
-        return self.name
-    
-
-class Material(models.Model):
-    name = models.CharField(max_length=50)   # Premium Canvas / Acrylic Glass
-    description = models.TextField(blank=True)
-    extra_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    def __str__(self):
-        return self.name
 

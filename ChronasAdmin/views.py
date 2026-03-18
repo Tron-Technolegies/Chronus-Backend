@@ -295,6 +295,8 @@ def add_products(request):
         image = request.FILES.get("image")
 
         specification = request.POST.get("specification")
+        frame_ids = request.data.get("frame_ids", [])
+        material_ids = request.data.get("material_ids", [])
 
         # Convert specification JSON string → dictionary
         if specification:
@@ -345,6 +347,11 @@ def add_products(request):
             is_best_seller=is_best_seller,
             specification=specification
         )
+        if frame_ids:
+            product.frames.set(frame_ids)
+
+        if material_ids:
+            product.materials.set(material_ids)
 
         # ------------------------
         # ADD SIZES
@@ -585,7 +592,14 @@ def update_product(request, product_id):
         stock = request.POST.get("stock")
         image = request.FILES.get("image")
         specification = request.POST.get("specification")
+        frame_ids = request.data.get("frame_ids")
+        material_ids = request.data.get("material_ids")
 
+        if frame_ids is not None:
+            product.frames.set(frame_ids)
+
+        if material_ids is not None:
+            product.materials.set(material_ids)
         # NAME
         if name:
             product.name = name
