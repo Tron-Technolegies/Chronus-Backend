@@ -596,14 +596,216 @@ def login(request):
         "tokens": tokens
     })
 
-from django.db.models import Q
+# from django.db.models import Q
+# from django.http import JsonResponse
+# from django.views.decorators.csrf import csrf_exempt
+# from django.views.decorators.http import require_http_methods
+# @csrf_exempt
+# @require_http_methods(["GET"])
+# def view_products(request):
+
+#     category = request.GET.get("category")
+#     subcategory = request.GET.get("subcategory")
+#     search = request.GET.get("search")
+#     min_price = request.GET.get("min_price")
+#     max_price = request.GET.get("max_price")
+
+#     try:
+#         page = int(request.GET.get("page", 1))
+#         limit = int(request.GET.get("limit", 12))
+#     except ValueError:
+#         return JsonResponse({"error": "Invalid pagination values"}, status=400)
+
+#     offset = (page - 1) * limit
+
+#     products = Product.objects.select_related(
+#         "category", "subcategory", "brand"
+#     ).prefetch_related(
+#         "sizes",
+#         "colors",
+#         "gallery"
+#     )
+
+#     # CATEGORY FILTER
+#     if category:
+#         if category.isdigit():
+#             products = products.filter(category__id=category)
+#         else:
+#             products = products.filter(category__name__icontains=category)
+
+#     # SUBCATEGORY FILTER
+#     if subcategory:
+#         if subcategory.isdigit():
+#             products = products.filter(subcategory__id=subcategory)
+#         else:
+#             products = products.filter(subcategory__name__icontains=subcategory)
+
+#     # SEARCH
+#     if search:
+#         products = products.filter(
+#             Q(name__icontains=search) |
+#             Q(brand__name__icontains=search) |
+#             Q(category__name__icontains=search) |
+#             Q(subcategory__name__icontains=search)
+#         )
+
+#     # PRICE FILTER
+#     if min_price:
+#         products = products.filter(price__gte=min_price)
+
+#     if max_price:
+#         products = products.filter(price__lte=max_price)
+
+#     total_products = products.count()
+
+#     products = products[offset:offset + limit]
+
+#     data = []
+
+#     for product in products:
+
+#         data.append({
+#             "id": product.id,
+
+#             "name": product.name,
+
+#             "category": {
+#                 "id": product.category.id,
+#                 "name": product.category.name
+#             } if product.category else None,
+
+#             "subcategory": {
+#                 "id": product.subcategory.id,
+#                 "name": product.subcategory.name
+#             } if product.subcategory else None,
+
+#             "brand": {
+#                 "id": product.brand.id,
+#                 "name": product.brand.name
+#             } if product.brand else None,
+
+#             "price": str(product.price),
+
+#             "stock": product.stock,
+
+#             "image": product.image.url if product.image else None,
+
+#             "created_at": product.created_at,
+
+#             "is_featured": product.is_featured,
+
+#             "is_best_seller": product.is_best_seller,
+
+#             "specification": product.specification,
+
+#             "sizes": [
+#                 {
+#                     "size": s.size,
+#                     "price": str(s.price)
+#                 }
+#                 for s in product.sizes.all()
+#             ],
+
+#             "colors": [
+#                 {
+#                     "color_name": c.color_name,
+#                     "image": c.image.url if c.image else None
+#                 }
+#                 for c in product.colors.all()
+#             ],
+
+#             "gallery": [
+#                 img.image.url
+#                 for img in product.gallery.all()
+#                 if img.image
+#             ]
+#         })
+
+#     return JsonResponse({
+#         "page": page,
+#         "limit": limit,
+#         "total_products": total_products,
+#         "total_pages": (total_products + limit - 1) // limit,
+#         "products": data
+#     }, status=200)
+
+# @csrf_exempt
+# @require_http_methods(["GET"])
+# def view_single_product(request, product_id):
+#     try:
+#         product = Product.objects.select_related(
+#             "category", "subcategory", "brand"
+#         ).prefetch_related("gallery","sizes").get(id=product_id)
+#         reviews_qs = Review.objects.filter(product=product).order_by("-created_at")
+#         rating_summary = reviews_qs.aggregate(
+#             avg_rating=Avg("rating"),
+#             total_reviews=Count("id")
+#         )
+
+#         data = {
+#             "id": product.id,
+#             "name": product.name,
+
+#             "category": {
+#                 "id": product.category.id,
+#                 "name": product.category.name
+#             } if product.category else None,
+
+#             "subcategory": {
+#                 "id": product.subcategory.id,
+#                 "name": product.subcategory.name
+#             } if getattr(product, "subcategory", None) else None,
+
+#             "brand": {
+#                 "id": product.brand.id,
+#                 "name": product.brand.name
+#             } if product.brand else None,
+
+#             "price": str(product.price),
+#             "description": product.description,
+#             "stock": product.stock,
+#             "image": product.image.url if product.image else None,
+#             "gallery": [img.image.url for img in product.gallery.all()],
+#             "is_featured": product.is_featured,
+#             "is_best_seller": product.is_best_seller,
+#             "created_at": product.created_at,
+#             "specification": product.specification,   
+
+#             "sizes": [                                
+#                 {
+#                     "size": s.size,
+#                     "price": str(s.price)
+#                 }
+#                 for s in product.sizes.all()
+#             ],
+#             "average_rating": round(rating_summary["avg_rating"] or 0, 1),
+#             "review_count": rating_summary["total_reviews"],
+#             "reviews": [
+#                 {
+#                     "id": r.id,
+#                     "name": r.name,
+#                     "rating": r.rating,
+#                     "comment": r.comment,
+#                     "created_at": r.created_at,
+#                 }
+#                 for r in reviews_qs
+#             ]
+#         }
+
+#         return JsonResponse(data, status=200)
+
+#     except Product.DoesNotExist:
+#         return JsonResponse({"error": "Product not found"}, status=404)
+
+
+from django.db.models import Q, Avg, Count
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_products(request):
-
     category = request.GET.get("category")
     subcategory = request.GET.get("subcategory")
     search = request.GET.get("search")
@@ -616,6 +818,9 @@ def view_products(request):
     except ValueError:
         return JsonResponse({"error": "Invalid pagination values"}, status=400)
 
+    if page < 1 or limit < 1:
+        return JsonResponse({"error": "Page and limit must be greater than 0"}, status=400)
+
     offset = (page - 1) * limit
 
     products = Product.objects.select_related(
@@ -623,7 +828,9 @@ def view_products(request):
     ).prefetch_related(
         "sizes",
         "colors",
-        "gallery"
+        "gallery",
+        "frames",
+        "materials"
     )
 
     # CATEGORY FILTER
@@ -657,16 +864,15 @@ def view_products(request):
         products = products.filter(price__lte=max_price)
 
     total_products = products.count()
+    total_pages = (total_products + limit - 1) // limit
 
     products = products[offset:offset + limit]
 
     data = []
 
     for product in products:
-
         data.append({
             "id": product.id,
-
             "name": product.name,
 
             "category": {
@@ -685,17 +891,12 @@ def view_products(request):
             } if product.brand else None,
 
             "price": str(product.price),
-
+            "description": product.description,
             "stock": product.stock,
-
             "image": product.image.url if product.image else None,
-
             "created_at": product.created_at,
-
             "is_featured": product.is_featured,
-
             "is_best_seller": product.is_best_seller,
-
             "specification": product.specification,
 
             "sizes": [
@@ -708,6 +909,7 @@ def view_products(request):
 
             "colors": [
                 {
+                    "id": c.id,
                     "color_name": c.color_name,
                     "image": c.image.url if c.image else None
                 }
@@ -718,6 +920,26 @@ def view_products(request):
                 img.image.url
                 for img in product.gallery.all()
                 if img.image
+            ],
+
+            "frames": [
+                {
+                    "id": f.id,
+                    "name": f.name,
+                    "extra_price": str(f.extra_price) if f.extra_price is not None else None,
+                    "image": f.image.url if getattr(f, "image", None) else None
+                }
+                for f in product.frames.all()
+            ],
+
+            "materials": [
+                {
+                    "id": m.id,
+                    "name": m.name,
+                    "description": m.description,
+                    "extra_price": str(m.extra_price) if m.extra_price is not None else None
+                }
+                for m in product.materials.all()
             ]
         })
 
@@ -725,9 +947,161 @@ def view_products(request):
         "page": page,
         "limit": limit,
         "total_products": total_products,
-        "total_pages": (total_products + limit - 1) // limit,
+        "total_pages": total_pages,
         "products": data
-    }, status=200)
+    }, status=200)from django.db.models import Q, Avg, Count
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def view_products(request):
+    category = request.GET.get("category")
+    subcategory = request.GET.get("subcategory")
+    search = request.GET.get("search")
+    min_price = request.GET.get("min_price")
+    max_price = request.GET.get("max_price")
+
+    try:
+        page = int(request.GET.get("page", 1))
+        limit = int(request.GET.get("limit", 12))
+    except ValueError:
+        return JsonResponse({"error": "Invalid pagination values"}, status=400)
+
+    if page < 1 or limit < 1:
+        return JsonResponse({"error": "Page and limit must be greater than 0"}, status=400)
+
+    offset = (page - 1) * limit
+
+    products = Product.objects.select_related(
+        "category", "subcategory", "brand"
+    ).prefetch_related(
+        "sizes",
+        "colors",
+        "gallery",
+        "frames",
+        "materials"
+    )
+
+    # CATEGORY FILTER
+    if category:
+        if category.isdigit():
+            products = products.filter(category__id=category)
+        else:
+            products = products.filter(category__name__icontains=category)
+
+    # SUBCATEGORY FILTER
+    if subcategory:
+        if subcategory.isdigit():
+            products = products.filter(subcategory__id=subcategory)
+        else:
+            products = products.filter(subcategory__name__icontains=subcategory)
+
+    # SEARCH
+    if search:
+        products = products.filter(
+            Q(name__icontains=search) |
+            Q(brand__name__icontains=search) |
+            Q(category__name__icontains=search) |
+            Q(subcategory__name__icontains=search)
+        )
+
+    # PRICE FILTER
+    if min_price:
+        products = products.filter(price__gte=min_price)
+
+    if max_price:
+        products = products.filter(price__lte=max_price)
+
+    total_products = products.count()
+    total_pages = (total_products + limit - 1) // limit
+
+    products = products[offset:offset + limit]
+
+    data = []
+
+    for product in products:
+        data.append({
+            "id": product.id,
+            "name": product.name,
+
+            "category": {
+                "id": product.category.id,
+                "name": product.category.name
+            } if product.category else None,
+
+            "subcategory": {
+                "id": product.subcategory.id,
+                "name": product.subcategory.name
+            } if product.subcategory else None,
+
+            "brand": {
+                "id": product.brand.id,
+                "name": product.brand.name
+            } if product.brand else None,
+
+            "price": str(product.price),
+            "description": product.description,
+            "stock": product.stock,
+            "image": product.image.url if product.image else None,
+            "created_at": product.created_at,
+            "is_featured": product.is_featured,
+            "is_best_seller": product.is_best_seller,
+            "specification": product.specification,
+
+            "sizes": [
+                {
+                    "size": s.size,
+                    "price": str(s.price)
+                }
+                for s in product.sizes.all()
+            ],
+
+            "colors": [
+                {
+                    "id": c.id,
+                    "color_name": c.color_name,
+                    "image": c.image.url if c.image else None
+                }
+                for c in product.colors.all()
+            ],
+
+            "gallery": [
+                img.image.url
+                for img in product.gallery.all()
+                if img.image
+            ],
+
+            "frames": [
+                {
+                    "id": f.id,
+                    "name": f.name,
+                    "extra_price": str(f.extra_price) if f.extra_price is not None else None,
+                    "image": f.image.url if getattr(f, "image", None) else None
+                }
+                for f in product.frames.all()
+            ],
+
+            "materials": [
+                {
+                    "id": m.id,
+                    "name": m.name,
+                    "description": m.description,
+                    "extra_price": str(m.extra_price) if m.extra_price is not None else None
+                }
+                for m in product.materials.all()
+            ]
+        })
+
+    return JsonResponse({
+        "page": page,
+        "limit": limit,
+        "total_products": total_products,
+        "total_pages": total_pages,
+        "products": data
+    }, status=200)      
+
 
 @csrf_exempt
 @require_http_methods(["GET"])
@@ -735,8 +1109,16 @@ def view_single_product(request, product_id):
     try:
         product = Product.objects.select_related(
             "category", "subcategory", "brand"
-        ).prefetch_related("gallery","sizes").get(id=product_id)
+        ).prefetch_related(
+            "gallery",
+            "sizes",
+            "colors",
+            "frames",
+            "materials"
+        ).get(id=product_id)
+
         reviews_qs = Review.objects.filter(product=product).order_by("-created_at")
+
         rating_summary = reviews_qs.aggregate(
             avg_rating=Avg("rating"),
             total_reviews=Count("id")
@@ -754,7 +1136,7 @@ def view_single_product(request, product_id):
             "subcategory": {
                 "id": product.subcategory.id,
                 "name": product.subcategory.name
-            } if getattr(product, "subcategory", None) else None,
+            } if product.subcategory else None,
 
             "brand": {
                 "id": product.brand.id,
@@ -765,21 +1147,59 @@ def view_single_product(request, product_id):
             "description": product.description,
             "stock": product.stock,
             "image": product.image.url if product.image else None,
-            "gallery": [img.image.url for img in product.gallery.all()],
+
+            "gallery": [
+                img.image.url
+                for img in product.gallery.all()
+                if img.image
+            ],
+
             "is_featured": product.is_featured,
             "is_best_seller": product.is_best_seller,
             "created_at": product.created_at,
-            "specification": product.specification,   
+            "specification": product.specification,
 
-            "sizes": [                                
+            "sizes": [
                 {
+                    "id": s.id,
                     "size": s.size,
                     "price": str(s.price)
                 }
                 for s in product.sizes.all()
             ],
+
+            "colors": [
+                {
+                    "id": c.id,
+                    "color_name": c.color_name,
+                    "image": c.image.url if c.image else None
+                }
+                for c in product.colors.all()
+            ],
+
+            "frames": [
+                {
+                    "id": f.id,
+                    "name": f.name,
+                    "extra_price": str(f.extra_price) if f.extra_price is not None else None,
+                    "image": f.image.url if getattr(f, "image", None) else None
+                }
+                for f in product.frames.all()
+            ],
+
+            "materials": [
+                {
+                    "id": m.id,
+                    "name": m.name,
+                    "description": m.description,
+                    "extra_price": str(m.extra_price) if m.extra_price is not None else None
+                }
+                for m in product.materials.all()
+            ],
+
             "average_rating": round(rating_summary["avg_rating"] or 0, 1),
             "review_count": rating_summary["total_reviews"],
+
             "reviews": [
                 {
                     "id": r.id,
@@ -796,7 +1216,8 @@ def view_single_product(request, product_id):
 
     except Product.DoesNotExist:
         return JsonResponse({"error": "Product not found"}, status=404)
-        
+
+
 from django.views.decorators.http import require_http_methods
 
 @csrf_exempt
