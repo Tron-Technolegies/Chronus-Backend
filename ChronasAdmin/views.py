@@ -295,8 +295,24 @@ def add_products(request):
         image = request.FILES.get("image")
 
         specification = request.POST.get("specification")
-        frame_ids = request.data.get("frame_ids", [])
-        material_ids = request.data.get("material_ids", [])
+        frame_ids = request.POST.get("frame_ids")
+        material_ids = request.POST.get("material_ids")
+        # material_ids = request.data.get("material_ids", [])
+        if frame_ids:
+            try:
+                frame_ids = json.loads(frame_ids)
+            except json.JSONDecodeError:
+                return JsonResponse({"error": "Invalid frame_ids format"}, status=400)
+        else:
+            frame_ids = []
+
+        if material_ids:
+            try:
+                material_ids = json.loads(material_ids)
+            except json.JSONDecodeError:
+                return JsonResponse({"error": "Invalid material_ids format"}, status=400)
+        else:
+            material_ids = []
 
         # Convert specification JSON string → dictionary
         if specification:
@@ -473,7 +489,9 @@ def view_products(request):
     ).prefetch_related(
         "sizes",
         "colors",
-        "gallery"
+        "gallery",
+        "frames",
+        "materials"
     )
 
     # CATEGORY FILTER
@@ -536,6 +554,8 @@ def view_products(request):
 
             "price": str(product.price),
 
+            "description": product.description,
+
             "stock": product.stock,
 
             "image": product.image.url if product.image else None,
@@ -568,6 +588,23 @@ def view_products(request):
                 img.image.url
                 for img in product.gallery.all()
                 if img.image
+            ],
+            "frames": [
+                {
+                    "id": f.id,
+                    "name": f.name,
+                    "extra_price": str(f.extra_price) if hasattr(f, "extra_price") else None
+                }
+                for f in product.frames.all()
+            ],
+
+            "materials": [
+                {
+                    "id": m.id,
+                    "name": m.name,
+                    "extra_price": str(m.extra_price) if hasattr(m, "extra_price") else None
+                }
+                for m in product.materials.all()
             ]
         })
 
@@ -578,6 +615,165 @@ def view_products(request):
         "total_pages": (total_products + limit - 1) // limit,
         "products": data
     }, status=200)
+# @csrf_exempt
+# @require_http_methods(["POST"])
+# def update_product(request, product_id):
+#     try:
+#         product = Product.objects.get(id=product_id)
+
+#         name = request.POST.get("name")
+#         category_id = request.POST.get("category")
+#         brand_id = request.POST.get("brand")
+#         price = request.POST.get("price")
+#         description = request.POST.get("description")
+#         stock = request.POST.get("stock")
+#         image = request.FILES.get("image")
+#         specification = request.POST.get("specification")
+#         frame_ids = request.data.get("frame_ids")
+#         material_ids = request.data.get("material_ids")
+
+#         if frame_ids is not None:
+#             product.frames.set(frame_ids)
+
+#         if material_ids is not None:
+#             product.materials.set(material_ids)
+#         # NAME
+#         if name:
+#             product.name = name
+
+#         # CATEGORY
+#         if category_id:
+#             category = Category.objects.filter(id=category_id).first()
+#             if not category:
+#                 return JsonResponse({"error": "Invalid category"}, status=400)
+#             product.category = category
+
+#         # SUBCATEGORY
+#         subcategory_id = request.POST.get("subcategory")
+
+#         if subcategory_id is not None:
+#             if subcategory_id == "":
+#                 product.subcategory = None
+#             else:
+#                 subcategory = SubCategory.objects.filter(id=subcategory_id).first()
+#                 product.subcategory = subcategory
+
+#         # BRAND
+#         if brand_id:
+#             brand = Brand.objects.filter(id=brand_id).first()
+#             if not brand:
+#                 return JsonResponse({"error": "Invalid brand"}, status=400)
+#             product.brand = brand
+
+#         # PRICE
+#         if price is not None:
+#             product.price = price
+
+#         # DESCRIPTION
+#         if description:
+#             product.description = description
+
+#         # STOCK
+#         if stock is not None:
+#             product.stock = stock
+
+#         # MAIN IMAGE
+#         if image:
+#             if product.image:
+#                 cloudinary.uploader.destroy(product.image.public_id)
+
+#             product.image = image
+
+#         # SPECIFICATION
+#         if specification:
+#             try:
+#                 specification = json.loads(specification)
+#                 product.specification = specification
+#             except json.JSONDecodeError:
+#                 return JsonResponse({"error": "Invalid specification format"}, status=400)
+
+#         # ------------------------
+#         # UPDATE SIZES
+#         # ------------------------
+#         sizes = request.POST.get("sizes")
+
+#         if sizes:
+#             try:
+#                 sizes = json.loads(sizes)
+
+#                 product.sizes.all().delete()
+
+#                 for item in sizes:
+#                     FineArtSize.objects.create(
+#                         product=product,
+#                         size=item.get("size"),
+#                         price=item.get("price")
+#                     )
+
+#             except json.JSONDecodeError:
+#                 return JsonResponse({"error": "Invalid sizes format"}, status=400)
+
+#         # ------------------------
+#         # UPDATE COLORS
+#         # ------------------------
+#         colors = request.POST.get("colors")
+
+#         if colors:
+#             try:
+#                 colors = json.loads(colors)
+
+#                 product.colors.all().delete()
+
+#                 for index, color in enumerate(colors):
+
+#                     color_image = request.FILES.get(f"color_image_{index}")
+
+#                     ProductColor.objects.create(
+#                         product=product,
+#                         color_name=color.get("color_name"),
+#                         image=color_image
+#                     )
+
+#             except json.JSONDecodeError:
+#                 return JsonResponse({"error": "Invalid colors format"}, status=400)
+
+#         product.save()
+
+#         # ------------------------
+#         # UPDATE GALLERY
+#         # ------------------------
+#         gallery_images = request.FILES.getlist("images")
+
+#         if gallery_images:
+
+#             # delete old gallery images from cloudinary
+#             for img in product.gallery.all():
+#                 cloudinary.uploader.destroy(img.image.public_id)
+
+#             product.gallery.all().delete()
+
+#             # add new images
+#             for img in gallery_images:
+#                 ProductImage.objects.create(
+#                     product=product,
+#                     image=img
+#                 )
+
+#         return JsonResponse({
+#             "message": "Product updated successfully",
+#             "id": product.id,
+#             "specification": product.specification
+#         })
+
+#     except Product.DoesNotExist:
+#         return JsonResponse({"error": "Product not found"}, status=404)
+
+#     except Exception as e:
+#         return JsonResponse({
+#             "error": "Something went wrong",
+#             "details": str(e)
+#         }, status=500)
+    
 @csrf_exempt
 @require_http_methods(["POST"])
 def update_product(request, product_id):
@@ -592,14 +788,25 @@ def update_product(request, product_id):
         stock = request.POST.get("stock")
         image = request.FILES.get("image")
         specification = request.POST.get("specification")
-        frame_ids = request.data.get("frame_ids")
-        material_ids = request.data.get("material_ids")
+        frame_ids = request.POST.get("frame_ids")
+        material_ids = request.POST.get("material_ids")
 
+        # FRAMES
         if frame_ids is not None:
-            product.frames.set(frame_ids)
+            try:
+                frame_ids = json.loads(frame_ids) if frame_ids else []
+                product.frames.set(frame_ids)
+            except json.JSONDecodeError:
+                return JsonResponse({"error": "Invalid frame_ids format"}, status=400)
 
+        # MATERIALS
         if material_ids is not None:
-            product.materials.set(material_ids)
+            try:
+                material_ids = json.loads(material_ids) if material_ids else []
+                product.materials.set(material_ids)
+            except json.JSONDecodeError:
+                return JsonResponse({"error": "Invalid material_ids format"}, status=400)
+
         # NAME
         if name:
             product.name = name
@@ -613,7 +820,6 @@ def update_product(request, product_id):
 
         # SUBCATEGORY
         subcategory_id = request.POST.get("subcategory")
-
         if subcategory_id is not None:
             if subcategory_id == "":
                 product.subcategory = None
@@ -633,7 +839,7 @@ def update_product(request, product_id):
             product.price = price
 
         # DESCRIPTION
-        if description:
+        if description is not None:
             product.description = description
 
         # STOCK
@@ -644,7 +850,6 @@ def update_product(request, product_id):
         if image:
             if product.image:
                 cloudinary.uploader.destroy(product.image.public_id)
-
             product.image = image
 
         # SPECIFICATION
@@ -655,15 +860,11 @@ def update_product(request, product_id):
             except json.JSONDecodeError:
                 return JsonResponse({"error": "Invalid specification format"}, status=400)
 
-        # ------------------------
         # UPDATE SIZES
-        # ------------------------
         sizes = request.POST.get("sizes")
-
         if sizes:
             try:
                 sizes = json.loads(sizes)
-
                 product.sizes.all().delete()
 
                 for item in sizes:
@@ -676,19 +877,14 @@ def update_product(request, product_id):
             except json.JSONDecodeError:
                 return JsonResponse({"error": "Invalid sizes format"}, status=400)
 
-        # ------------------------
         # UPDATE COLORS
-        # ------------------------
         colors = request.POST.get("colors")
-
         if colors:
             try:
                 colors = json.loads(colors)
-
                 product.colors.all().delete()
 
                 for index, color in enumerate(colors):
-
                     color_image = request.FILES.get(f"color_image_{index}")
 
                     ProductColor.objects.create(
@@ -702,20 +898,14 @@ def update_product(request, product_id):
 
         product.save()
 
-        # ------------------------
         # UPDATE GALLERY
-        # ------------------------
         gallery_images = request.FILES.getlist("images")
-
         if gallery_images:
-
-            # delete old gallery images from cloudinary
             for img in product.gallery.all():
                 cloudinary.uploader.destroy(img.image.public_id)
 
             product.gallery.all().delete()
 
-            # add new images
             for img in gallery_images:
                 ProductImage.objects.create(
                     product=product,
@@ -736,8 +926,6 @@ def update_product(request, product_id):
             "error": "Something went wrong",
             "details": str(e)
         }, status=500)
-    
-
 @csrf_exempt
 @require_http_methods(["DELETE"])
 def delete_product(request, product_id):
@@ -1316,7 +1504,7 @@ from .models import Frame, Material
 
 
 # ---------------- FRAME ---------------- #
-
+@csrf_exempt
 @require_http_methods(["POST"])
 def create_frame(request):
 
@@ -1335,6 +1523,7 @@ def create_frame(request):
         "id": frame.id
     })
 
+@csrf_exempt
 @require_http_methods(["GET"])
 def list_frames(request):
 
@@ -1352,7 +1541,7 @@ def list_frames(request):
 
     return JsonResponse(data, safe=False)
 
-
+@csrf_exempt
 @require_http_methods(["PUT"])
 def update_frame(request, frame_id):
 
@@ -1383,7 +1572,7 @@ def update_frame(request, frame_id):
             "error": "Frame not found"
         }, status=404)
 
-
+@csrf_exempt
 @require_http_methods(["DELETE"])
 def delete_frame(request, frame_id):
 
@@ -1398,6 +1587,7 @@ def delete_frame(request, frame_id):
 
 
 # ---------------- MATERIAL ---------------- #
+@csrf_exempt
 @require_http_methods(["POST"])
 def create_material(request):
 
@@ -1416,7 +1606,7 @@ def create_material(request):
         "id": material.id
     })
 
-
+@csrf_exempt
 @require_http_methods(["GET"])
 def list_materials(request):
 
@@ -1434,6 +1624,7 @@ def list_materials(request):
 
     return JsonResponse(data, safe=False)
 
+@csrf_exempt
 @require_http_methods(["PUT"])
 def update_material(request, material_id):
 
@@ -1463,8 +1654,9 @@ def update_material(request, material_id):
         return JsonResponse({
             "error": "Material not found"
         }, status=404)
+    
 
-
+@csrf_exempt
 @require_http_methods(["DELETE"])
 def delete_material(request, material_id):
 
