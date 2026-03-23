@@ -49,7 +49,8 @@ CORS_ALLOWED_ORIGINS = [
     "https://chronosgalleriesadmin.netlify.app",
     "https://chronosgalleries.netlify.app",
     "https://admin.chronosgallery.com",
-    "https://chronosgalleriesadmin.netlify.app"
+    "https://chronosgalleriesadmin.netlify.app",
+    "https://chronosadminpanel.netlify.app"
 ]
 
 CORS_ALLOW_HEADERS = list(default_headers) + [

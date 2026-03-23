@@ -1670,3 +1670,42 @@ def delete_material(request, material_id):
     except Material.DoesNotExist:
         return JsonResponse({"error": "Material not found"}, status=404)
 
+
+
+
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404
+from django.views.decorators.http import require_http_methods
+
+@require_http_methods(["GET"])
+def order_detail_api(request, id):
+    order = get_object_or_404(
+        Order.objects.select_related('user')
+        .prefetch_related('items__product', 'items__size', 'items__frame', 'items__material'),
+        id=id
+    )
+
+    items = []
+    for item in order.items.all():
+        items.append({
+            "product_name": item.product.name if item.product else None,
+            "quantity": item.quantity,
+            "price": float(item.price),
+            "total": float(item.get_total_price()),
+
+            "size": item.size.name if item.size else None,
+            "frame": item.frame.name if item.frame else None,
+            "material": item.material.name if item.material else None,
+        })
+
+    data = {
+        "id": order.id,
+        "customer": order.user.email if order.user else "Guest",
+        "date": order.created_at,
+        "status": order.status,
+        "total_price": float(order.total_price),
+        "tracking_url": order.tracking_url,
+        "items": items
+    }
+
+    return JsonResponse(data)
