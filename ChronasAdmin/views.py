@@ -1542,7 +1542,7 @@ def list_frames(request):
     return JsonResponse(data, safe=False)
 
 @csrf_exempt
-@require_http_methods(["PUT"])
+@require_http_methods(["POST"])
 def update_frame(request, frame_id):
 
     try:

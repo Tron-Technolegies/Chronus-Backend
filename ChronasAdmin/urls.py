@@ -47,7 +47,7 @@ urlpatterns = [
     path("materials/", views.list_materials, name="list_materials"),
     path("materials/update/<int:material_id>/", views.update_material, name="update_material"),
     path("materials/delete/<int:material_id>/", views.delete_material, name="delete_material"),
-    path('order_detail_api', views.order_detail_api, name='order_detail_api')
+    path('order_detail_api/<int:id>', views.order_detail_api, name='order_detail_api')
 
 
 
