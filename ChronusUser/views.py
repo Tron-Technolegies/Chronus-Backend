@@ -1406,3 +1406,174 @@ def calculate_price(request):
     return JsonResponse({
         "price": price
     })
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def track_order(request, order_id):
+
+    order = get_object_or_404(Order, id=order_id)
+
+    return Response({
+
+        "order_id": order.id,
+
+        "status": order.status,
+
+        "tracking_link": order.tracking_link,
+
+        "tracking_number": order.tracking_number,
+
+        "carrier": order.carrier,
+
+        "shipped_at": order.shipped_at
+    })
+
+
+
+
+class CreateTabbyPayment(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        try:
+            order_id = request.data.get("order_id")
+
+            if not order_id:
+                return Response(
+                    {"error": "order_id required"},
+                    status=400
+                )
+
+            order = Order.objects.get(id=order_id)
+
+            # SECURITY CHECK
+            if request.user.is_authenticated:
+
+                if order.user != request.user:
+                    return Response(
+                        {"error": "Unauthorized order access"},
+                        status=403
+                    )
+
+            else:
+                guest_id = request.headers.get("X-Guest-Id")
+
+                print("Order Guest ID:", order.guest_id)
+                print("Header Guest ID:", guest_id)
+
+                if not guest_id or order.guest_id != guest_id:
+                    return Response(
+                        {"error": "Unauthorized guest order"},
+                        status=403
+                    )
+
+            url = "https://api.tabby.ai/api/v2/checkout"
+
+            headers = {
+                "Authorization": f"Bearer {settings.TABBY_SECRET_KEY}",
+                "Content-Type": "application/json"
+            }
+
+            payload = {
+                "payment": {
+                    "amount": str(order.total_amount),
+                    "currency": "AED",
+                    "description": f"Order #{order.id}",
+                    "buyer": {
+                        "email": order.email,
+                        "phone": order.phone,
+                        "name": request.data.get("name", "Customer")
+                    },
+                    "order": {
+                        "reference_id": str(order.id),
+                        "items": [
+                            {
+                                "title": item.product.name if item.product else "Product",
+                                "quantity": item.quantity,
+                                "unit_price": str(item.price),
+                                "category": (
+                                    item.product.category.name
+                                    if item.product and item.product.category
+                                    else "General"
+                                )
+                            }
+                            for item in order.items.all()
+                        ]
+                    },
+                    "shipping_address": {
+                        "address": order.shipping_address,
+                        "city": request.data.get("city", ""),
+                        "country": request.data.get("country", "AE")
+                    },
+                    "buyer_history": {
+                        "registered_since": "2024-01-01",
+                        "loyalty_level": 0
+                    }
+                },
+                "lang": "en",
+                "merchant_code": "VVAE",
+                "merchant_urls": {
+                    "success": "https://chronosgallery.com/payment-success",
+                    "cancel": "https://chronosgallery.com/payment-cancel",
+                    "failure": "https://chronosgallery.com/payment-failure"
+                }
+            }
+
+            print("TABBY URL:", url)
+            print("TABBY PAYLOAD:", payload)
+
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=30
+            )
+
+            print("STATUS:", response.status_code)
+            print("RESPONSE TEXT:")
+            print(response.text)
+
+            try:
+                data = response.json()
+            except Exception:
+                return Response(
+                    {
+                        "error": "Tabby returned non-JSON response",
+                        "status_code": response.status_code,
+                        "response": response.text
+                    },
+                    status=500
+                )
+
+            if response.status_code not in [200, 201]:
+                return Response(
+                    {
+                        "error": data
+                    },
+                    status=400
+                )
+
+            return Response({
+                "payment_id": data.get("id"),
+                "payment_url": data.get("configuration", {})
+                                  .get("available_products", {})
+                                  .get("installments", {})
+                                  .get("web_url"),
+                "full_response": data
+            })
+
+        except Order.DoesNotExist:
+            return Response(
+                {"error": "Invalid order"},
+                status=404
+            )
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+
+            return Response(
+                {"error": str(e)},
+                status=500
+            )

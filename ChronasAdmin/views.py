@@ -1000,40 +1000,113 @@ def view_orders(request):
     return JsonResponse({"orders": data}, status=200)
 from django.utils import timezone
 
+# @require_http_methods(["POST"])
+# def update_order_status(request, order_id):
+#     try:
+#         data = json.loads(request.body)
+
+#         order = Order.objects.get(id=order_id)
+
+#         status = data.get("status")
+#         tracking_link = data.get("tracking_link")
+
+#         if status:
+#             order.status = status
+
+#         # If marked as shipped
+#         if status == "shipped":
+#             order.tracking_link = tracking_link
+#             order.shipped_at = timezone.now()
+
+#         order.save()
+
+#         return JsonResponse({
+#             "message": "Order updated successfully",
+#             "id": order.id,
+#             "status": order.status,
+#             "tracking_link": order.tracking_link
+#         })
+
+#     except Order.DoesNotExist:
+#         return JsonResponse({"error": "Order not found"}, status=404)
+
+#     except json.JSONDecodeError:
+#         return JsonResponse({"error": "Invalid JSON format"}, status=400)
+  
+from django.utils import timezone
+import json
+
+
 @require_http_methods(["POST"])
 def update_order_status(request, order_id):
+
     try:
         data = json.loads(request.body)
 
-        order = Order.objects.get(id=order_id)
+        order = Order.objects.prefetch_related(
+            "items__product"
+        ).get(id=order_id)
 
         status = data.get("status")
-        tracking_link = data.get("tracking_link")
 
         if status:
             order.status = status
 
-        # If marked as shipped
+        # =========================
+        # CREATE SHIPMENT
+        # =========================
+
         if status == "shipped":
-            order.tracking_link = tracking_link
+
+            shipment = create_unified_shipment(order)
+
+            order.tracking_link = shipment.get("tracking_url")
+
+            order.tracking_number = shipment.get("tracking_number")
+
+            order.shipment_id = shipment.get("shipment_id")
+
+            order.carrier = shipment.get("carrier")
+
             order.shipped_at = timezone.now()
 
         order.save()
 
         return JsonResponse({
             "message": "Order updated successfully",
+
             "id": order.id,
+
             "status": order.status,
-            "tracking_link": order.tracking_link
+
+            "tracking_link": order.tracking_link,
+
+            "tracking_number": order.tracking_number,
+
+            "shipment_id": order.shipment_id,
+
+            "carrier": order.carrier
         })
 
     except Order.DoesNotExist:
-        return JsonResponse({"error": "Order not found"}, status=404)
+
+        return JsonResponse({
+            "error": "Order not found"
+        }, status=404)
 
     except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON format"}, status=400)
-  
 
+        return JsonResponse({
+            "error": "Invalid JSON format"
+        }, status=400)
+
+    except Exception as e:
+
+        return JsonResponse({
+            "error": str(e)
+        }, status=500)
+    
+    
 @csrf_exempt
 @require_http_methods(["POST"])
 def add_coupon(request):

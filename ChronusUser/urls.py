@@ -33,5 +33,10 @@ urlpatterns = [
     path('view_coupons/', views.view_coupons, name='view_coupons'),
     path("subcategories/", views.list_subcategories, name='subcategories'),
     path("payments/ziina/create/", views.CreateZiinaPayment.as_view(), name='ziina-payment-intent'),
-     path("calculate-price/", views.calculate_price, name="calculate_price"),
+    path("calculate-price/", views.calculate_price, name="calculate_price"),
+
+
+    path("track-order/<int:order_id>/", views.track_order, name='track_order'),
+    path("payments/tabby/",views.CreateTabbyPayment.as_view(),name="tabby-payment"
+),
 ]

@@ -134,6 +134,11 @@ class Order(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+
+    tracking_number = models.CharField(max_length=255, blank=True, null=True)
+    shipment_id = models.CharField(max_length=255, blank=True, null=True)
+    carrier = models.CharField(max_length=255, blank=True, null=True)
+
     def __str__(self):
         return f"Order #{self.id}"
 
@@ -158,6 +163,3 @@ class Coupon(models.Model):
 
     def __str__(self):
         return self.code
-
-
-

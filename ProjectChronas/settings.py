@@ -134,6 +134,7 @@ DATABASES = {
         "PORT": "5432",
     }
 }
+
 from datetime import timedelta
 
 REST_FRAMEWORK = {
@@ -194,5 +195,8 @@ STRIPE_WEBHOOK_SECRET=env("STRIPE_WEBHOOK_SECRET")
 
 
 ZIINA_API_KEY = os.getenv("ZIINA_API_KEY")
+
+TABBY_SECRET_KEY = os.getenv("TABBY_SECRET_KEY")
+TABBY_PUBLIC_KEY = os.getenv("TABBY_PUBLIC_KEY")
 
 test ='test'
