@@ -1432,6 +1432,152 @@ def track_order(request, order_id):
 
 
 
+# class CreateTabbyPayment(APIView):
+#     permission_classes = [AllowAny]
+
+#     def post(self, request):
+#         try:
+#             order_id = request.data.get("order_id")
+
+#             if not order_id:
+#                 return Response(
+#                     {"error": "order_id required"},
+#                     status=400
+#                 )
+
+#             order = Order.objects.get(id=order_id)
+
+#             # SECURITY CHECK
+#             if request.user.is_authenticated:
+
+#                 if order.user != request.user:
+#                     return Response(
+#                         {"error": "Unauthorized order access"},
+#                         status=403
+#                     )
+
+#             else:
+#                 guest_id = request.headers.get("X-Guest-Id")
+
+#                 print("Order Guest ID:", order.guest_id)
+#                 print("Header Guest ID:", guest_id)
+
+#                 if not guest_id or order.guest_id != guest_id:
+#                     return Response(
+#                         {"error": "Unauthorized guest order"},
+#                         status=403
+#                     )
+
+#             url = "https://api.tabby.ai/api/v2/checkout"
+
+#             headers = {
+#                 "Authorization": f"Bearer {settings.TABBY_SECRET_KEY}",
+#                 "Content-Type": "application/json"
+#             }
+
+#             payload = {
+#                 "payment": {
+#                     "amount": str(order.total_amount),
+#                     "currency": "AED",
+#                     "description": f"Order #{order.id}",
+#                     "buyer": {
+#                         "email": order.email,
+#                         "phone": order.phone,
+#                         "name": request.data.get("name", "Customer")
+#                     },
+#                     "order": {
+#                         "reference_id": str(order.id),
+#                         "items": [
+#                             {
+#                                 "title": item.product.name if item.product else "Product",
+#                                 "quantity": item.quantity,
+#                                 "unit_price": str(item.price),
+#                                 "category": (
+#                                     item.product.category.name
+#                                     if item.product and item.product.category
+#                                     else "General"
+#                                 )
+#                             }
+#                             for item in order.items.all()
+#                         ]
+#                     },
+#                     "shipping_address": {
+#                         "address": order.shipping_address,
+#                         "city": request.data.get("city", ""),
+#                         "country": request.data.get("country", "AE")
+#                     },
+#                     "buyer_history": {
+#                         "registered_since": "2024-01-01",
+#                         "loyalty_level": 0
+#                     }
+#                 },
+#                 "lang": "en",
+#                 "merchant_code": "VVAE",
+#                 "merchant_urls": {
+#                     "success": "https://chronosgallery.com/payment-success",
+#                     "cancel": "https://chronosgallery.com/payment-cancel",
+#                     "failure": "https://chronosgallery.com/payment-failure"
+#                 }
+#             }
+
+#             print("TABBY URL:", url)
+#             print("TABBY PAYLOAD:", payload)
+
+#             response = requests.post(
+#                 url,
+#                 json=payload,
+#                 headers=headers,
+#                 timeout=30
+#             )
+
+#             print("STATUS:", response.status_code)
+#             print("RESPONSE TEXT:")
+#             print(response.text)
+
+#             try:
+#                 data = response.json()
+#             except Exception:
+#                 return Response(
+#                     {
+#                         "error": "Tabby returned non-JSON response",
+#                         "status_code": response.status_code,
+#                         "response": response.text
+#                     },
+#                     status=500
+#                 )
+
+#             if response.status_code not in [200, 201]:
+#                 return Response(
+#                     {
+#                         "error": data
+#                     },
+#                     status=400
+#                 )
+
+#             return Response({
+#                 "payment_id": data.get("id"),
+#                 "payment_url": data.get("configuration", {})
+#                                   .get("available_products", {})
+#                                   .get("installments", {})
+#                                   .get("web_url"),
+#                 "full_response": data
+#             })
+
+#         except Order.DoesNotExist:
+#             return Response(
+#                 {"error": "Invalid order"},
+#                 status=404
+#             )
+
+#         except Exception as e:
+#             import traceback
+#             traceback.print_exc()
+
+#             return Response(
+#                 {"error": str(e)},
+#                 status=500
+#             )
+        
 class CreateTabbyPayment(APIView):
     permission_classes = [AllowAny]
 
@@ -1477,7 +1623,7 @@ class CreateTabbyPayment(APIView):
 
             payload = {
                 "payment": {
-                    "amount": str(order.total_amount),
+                    "amount": float(order.total_amount),
                     "currency": "AED",
                     "description": f"Order #{order.id}",
                     "buyer": {
@@ -1491,7 +1637,7 @@ class CreateTabbyPayment(APIView):
                             {
                                 "title": item.product.name if item.product else "Product",
                                 "quantity": item.quantity,
-                                "unit_price": str(item.price),
+                                "unit_price": float(item.price),
                                 "category": (
                                     item.product.category.name
                                     if item.product and item.product.category
@@ -1520,8 +1666,25 @@ class CreateTabbyPayment(APIView):
                 }
             }
 
-            print("TABBY URL:", url)
-            print("TABBY PAYLOAD:", payload)
+            # DEBUGGING
+            if not settings.TABBY_SECRET_KEY:
+                return Response(
+                    {"error": "TABBY_SECRET_KEY is empty"},
+                    status=500
+                )
+
+            print("\n================ TABBY REQUEST ================")
+            print("URL:")
+            print(url)
+
+            print("\nSECRET KEY:")
+            print(repr(settings.TABBY_SECRET_KEY))
+
+            print("\nHEADERS:")
+            print(headers)
+
+            print("\nPAYLOAD:")
+            print(payload)
 
             response = requests.post(
                 url,
@@ -1530,18 +1693,30 @@ class CreateTabbyPayment(APIView):
                 timeout=30
             )
 
-            print("STATUS:", response.status_code)
-            print("RESPONSE TEXT:")
-            print(response.text)
+            print("\n================ TABBY RESPONSE ================")
+
+            print("STATUS CODE:")
+            print(response.status_code)
+
+            print("\nRESPONSE HEADERS:")
+            print(dict(response.headers))
+
+            print("\nRESPONSE BODY:")
+            print(repr(response.text))
+
+            print("\n================================================")
 
             try:
                 data = response.json()
-            except Exception:
+            except Exception as json_error:
+                print("JSON PARSE ERROR:", str(json_error))
+
                 return Response(
                     {
                         "error": "Tabby returned non-JSON response",
                         "status_code": response.status_code,
-                        "response": response.text
+                        "response": response.text,
+                        "headers": dict(response.headers)
                     },
                     status=500
                 )
@@ -1549,7 +1724,8 @@ class CreateTabbyPayment(APIView):
             if response.status_code not in [200, 201]:
                 return Response(
                     {
-                        "error": data
+                        "error": data,
+                        "status_code": response.status_code
                     },
                     status=400
                 )
