@@ -21,6 +21,7 @@ urlpatterns = [
 
     path('view_orders/', views.view_orders, name='view_orders'),
     path('update_order/<int:order_id>/', views.update_order_status, name='update_order_status'),
+    path('order_detail_api/<int:id>', views.order_detail_api, name='order_detail_api'),
 
     path('add_coupon/', views.add_coupon, name='add_coupon'),
     path('view_coupons/', views.view_coupons, name='view_coupons'),
@@ -47,10 +48,16 @@ urlpatterns = [
     path("materials/", views.list_materials, name="list_materials"),
     path("materials/update/<int:material_id>/", views.update_material, name="update_material"),
     path("materials/delete/<int:material_id>/", views.delete_material, name="delete_material"),
-    path('order_detail_api/<int:id>', views.order_detail_api, name='order_detail_api'),
+    
 
-    path("orders/<int:order_id>/status/",views.update_order_status, name='update_order_status'),
+  
 
+
+    path("supplier_list/", views.supplier_list, name="supplier_list"),
+    path("add_supplier/", views.add_supplier, name="add_supplier"),
+    path("supplier_detail/<int:id>/", views.supplier_detail, name="supplier_detail"),
+    path("update_supplier/<int:id>/", views.update_supplier, name="update_supplier"),
+    path("delete_supplier/<int:id>/", views.delete_supplier, name="delete_supplier"),
 
 
 ]

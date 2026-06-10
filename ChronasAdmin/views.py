@@ -286,6 +286,7 @@ from django.views.decorators.http import require_http_methods
 @require_http_methods(["POST"])
 def add_products(request):
     try:
+        supplier_id = request.POST.get("supplier")
         name = request.POST.get("name")
         category_id = request.POST.get("category")
         brand_id = request.POST.get("brand")
@@ -298,6 +299,16 @@ def add_products(request):
         frame_ids = request.POST.get("frame_ids")
         material_ids = request.POST.get("material_ids")
         # material_ids = request.data.get("material_ids", [])
+        supplier = None
+
+        if supplier_id:
+            supplier = Supplier.objects.filter(id=supplier_id).first()
+
+            if not supplier:
+                return JsonResponse(
+                    {"error": "Invalid supplier"},
+                    status=400
+                )
         if frame_ids:
             try:
                 frame_ids = json.loads(frame_ids)
@@ -351,6 +362,7 @@ def add_products(request):
         is_best_seller = request.POST.get("is_best_seller") in ["true", "True", "1"]
 
         product = Product.objects.create(
+            supplier=supplier,
             name=name,
             category=category,
             subcategory=subcategory,
@@ -439,6 +451,10 @@ def add_products(request):
             "category": product.category.id if product.category else None,
             "brand": product.brand.id if product.brand else None,
             "price": str(product.price),
+            "supplier": {
+                    "id": product.supplier.id,
+                    "name": product.supplier.name
+                } if product.supplier else None,
             "subcategory": {
                 "id": product.subcategory.id,
                 "name": product.subcategory.name
@@ -485,13 +501,14 @@ def view_products(request):
     offset = (page - 1) * limit
 
     products = Product.objects.select_related(
-        "category", "subcategory", "brand"
+        "category", "subcategory", "brand", "supplier"
     ).prefetch_related(
         "sizes",
         "colors",
         "gallery",
         "frames",
         "materials"
+        
     )
 
     # CATEGORY FILTER
@@ -551,6 +568,11 @@ def view_products(request):
                 "id": product.brand.id,
                 "name": product.brand.name
             } if product.brand else None,
+
+            "supplier": {
+                "id": product.supplier.id,
+                "name": product.supplier.name
+            } if product.supplier else None,
 
             "price": str(product.price),
 
@@ -779,7 +801,7 @@ def view_products(request):
 def update_product(request, product_id):
     try:
         product = Product.objects.get(id=product_id)
-
+        supplier_id = request.POST.get("supplier")
         name = request.POST.get("name")
         category_id = request.POST.get("category")
         brand_id = request.POST.get("brand")
@@ -833,6 +855,19 @@ def update_product(request, product_id):
             if not brand:
                 return JsonResponse({"error": "Invalid brand"}, status=400)
             product.brand = brand
+        
+        
+        if supplier_id:
+            supplier = Supplier.objects.filter(id=supplier_id).first()
+
+            if not supplier:
+                return JsonResponse(
+                    {"error": "Invalid supplier"},
+                    status=400
+                )
+
+            product.supplier = supplier
+
 
         # PRICE
         if price is not None:
@@ -915,6 +950,10 @@ def update_product(request, product_id):
         return JsonResponse({
             "message": "Product updated successfully",
             "id": product.id,
+            "supplier": {
+                "id": product.supplier.id,
+                "name": product.supplier.name
+            } if product.supplier else None,
             "specification": product.specification
         })
 
@@ -926,6 +965,9 @@ def update_product(request, product_id):
             "error": "Something went wrong",
             "details": str(e)
         }, status=500)
+    
+
+
 @csrf_exempt
 @require_http_methods(["DELETE"])
 def delete_product(request, product_id):
@@ -970,7 +1012,8 @@ def delete_product(request, product_id):
 @require_http_methods(["GET"])
 def view_orders(request):
 
-    orders = Order.objects.prefetch_related("items__product").all()
+    # orders = Order.objects.prefetch_related("items__product").all()
+    orders = Order.objects.prefetch_related("items__product__supplier").all()
 
     data = []
 
@@ -980,6 +1023,11 @@ def view_orders(request):
         for item in order.items.all():
             items.append({
                 "product_name": item.product.name,
+                "supplier": (
+                    item.product.supplier.name
+                    if item.product and item.product.supplier
+                    else None
+                ),
                 "quantity": item.quantity,
                 "price": str(item.price),
             })
@@ -998,41 +1046,8 @@ def view_orders(request):
         })
 
     return JsonResponse({"orders": data}, status=200)
-from django.utils import timezone
 
-# @require_http_methods(["POST"])
-# def update_order_status(request, order_id):
-#     try:
-#         data = json.loads(request.body)
 
-#         order = Order.objects.get(id=order_id)
-
-#         status = data.get("status")
-#         tracking_link = data.get("tracking_link")
-
-#         if status:
-#             order.status = status
-
-#         # If marked as shipped
-#         if status == "shipped":
-#             order.tracking_link = tracking_link
-#             order.shipped_at = timezone.now()
-
-#         order.save()
-
-#         return JsonResponse({
-#             "message": "Order updated successfully",
-#             "id": order.id,
-#             "status": order.status,
-#             "tracking_link": order.tracking_link
-#         })
-
-#     except Order.DoesNotExist:
-#         return JsonResponse({"error": "Order not found"}, status=404)
-
-#     except json.JSONDecodeError:
-#         return JsonResponse({"error": "Invalid JSON format"}, status=400)
-  
 from django.utils import timezone
 import json
 
@@ -1105,7 +1120,42 @@ def update_order_status(request, order_id):
         return JsonResponse({
             "error": str(e)
         }, status=500)
-    
+
+
+
+@require_http_methods(["GET"])
+def order_detail_api(request, id):
+    order = get_object_or_404(
+        Order.objects.select_related('user')
+        .prefetch_related('items__product', 'items__size', 'items__frame', 'items__material'),
+        id=id
+    )
+
+    items = []
+    for item in order.items.all():
+        items.append({
+            "product_name": item.product.name if item.product else None,
+            "quantity": item.quantity,
+            "price": float(item.price),
+            "total": float(item.get_total_amount()),
+
+            "size": item.size.name if item.size else None,
+            "frame": item.frame.name if item.frame else None,
+            "material": item.material.name if item.material else None,
+        })
+
+    data = {
+        "id": order.id,
+        "customer": order.user.email if order.user else "Guest",
+        "date": order.created_at,
+        "status": order.status,
+        "total_price": float(order.total_amount),
+        "tracking_url": order.tracking_link,
+        "items": items
+    }
+
+    return JsonResponse(data)
+
     
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -1274,7 +1324,7 @@ from django.db.models import Sum, Avg, Count
 from django.utils import timezone
 from datetime import timedelta
 from collections import defaultdict
-from .models import Order, OrderItem, Product
+from .models import Order, OrderItem, Product, Supplier
 
 
 @require_http_methods(["GET"])
@@ -1750,35 +1800,125 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_http_methods
 
+
+
+from django.http import JsonResponse
+from django.views.decorators.http import require_http_methods
+import json
+
+@require_http_methods(["POST"])
+@csrf_exempt
+def add_supplier(request):
+    try:
+        data = json.loads(request.body)
+
+        supplier = Supplier.objects.create(
+            name=data.get("name"),
+            email=data.get("email"),
+            phone=data.get("phone")
+        )
+
+        return JsonResponse({
+            "id": supplier.id,
+            "name": supplier.name,
+            "email": supplier.email,
+            "phone": supplier.phone
+        }, status=201)
+
+    except Exception as e:
+        return JsonResponse({
+            "error": str(e)
+        }, status=500)
+    
+
+
 @require_http_methods(["GET"])
-def order_detail_api(request, id):
-    order = get_object_or_404(
-        Order.objects.select_related('user')
-        .prefetch_related('items__product', 'items__size', 'items__frame', 'items__material'),
+def supplier_list(request):
+
+    suppliers = Supplier.objects.all().order_by("-id")
+
+    data = [
+        {
+            "id": supplier.id,
+            "name": supplier.name,
+            "email": supplier.email,
+            "phone": supplier.phone,
+        }
+        for supplier in suppliers
+    ]
+
+    return JsonResponse(data, safe=False)
+
+
+from django.shortcuts import get_object_or_404
+
+@require_http_methods(["GET"])
+def supplier_detail(request, id):
+
+    supplier = get_object_or_404(
+        Supplier,
         id=id
     )
 
-    items = []
-    for item in order.items.all():
-        items.append({
-            "product_name": item.product.name if item.product else None,
-            "quantity": item.quantity,
-            "price": float(item.price),
-            "total": float(item.get_total_price()),
+    return JsonResponse({
+        "id": supplier.id,
+        "name": supplier.name,
+        "email": supplier.email,
+        "phone": supplier.phone,
+      
+    })
 
-            "size": item.size.name if item.size else None,
-            "frame": item.frame.name if item.frame else None,
-            "material": item.material.name if item.material else None,
+
+@require_http_methods(["PUT"])
+@csrf_exempt
+def update_supplier(request, id):
+
+    try:
+        supplier = get_object_or_404(
+            Supplier,
+            id=id
+        )
+
+        data = json.loads(request.body)
+
+        supplier.name = data.get(
+            "name",
+            supplier.name
+        )
+
+        supplier.email = data.get(
+            "email",
+            supplier.email
+        )
+
+        supplier.phone = data.get(
+            "phone",
+            supplier.phone
+        )
+
+        supplier.save()
+
+        return JsonResponse({
+            "message": "Supplier updated successfully"
         })
 
-    data = {
-        "id": order.id,
-        "customer": order.user.email if order.user else "Guest",
-        "date": order.created_at,
-        "status": order.status,
-        "total_price": float(order.total_price),
-        "tracking_url": order.tracking_url,
-        "items": items
-    }
+    except Exception as e:
+        return JsonResponse({
+            "error": str(e)
+        }, status=500)
+    
 
-    return JsonResponse(data)
+@require_http_methods(["DELETE"])
+@csrf_exempt
+def delete_supplier(request, id):
+
+    supplier = get_object_or_404(
+        Supplier,
+        id=id
+    )
+
+    supplier.delete()
+
+    return JsonResponse({
+        "message": "Supplier deleted successfully"
+    })

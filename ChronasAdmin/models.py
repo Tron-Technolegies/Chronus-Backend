@@ -45,7 +45,14 @@ class Material(models.Model):
     def __str__(self):
         return self.name
 
+class Supplier(models.Model):
+    name = models.CharField(max_length=200, unique=True)
+    email = models.EmailField(blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, null=True)
 
+    def __str__(self):
+        return self.name
+    
 class Product(models.Model):
     GENDER_CHOICES = (
         ("men", "Men"),
@@ -72,6 +79,7 @@ class Product(models.Model):
     specification = models.JSONField(blank=True, null=True)
     frames = models.ManyToManyField(Frame, blank=True, related_name="products")
     materials = models.ManyToManyField(Material, blank=True, related_name="products")
+    supplier = models.ForeignKey(Supplier,on_delete=models.SET_NULL,null=True,blank=True,related_name="products")
 
     def __str__(self):
         return self.name
