@@ -1,11 +1,11 @@
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import APIView, api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 import stripe
-from ChronasAdmin.models import Coupon, Product, Order, OrderItem, SubCategory
+from ChronasAdmin.models import Coupon, Notification, Product, Order, OrderItem, SubCategory
 from ChronusUser.utils import apply_coupon_to_order
 from .models import GuestSession, Cart, CartItem, Wishlist, Review
 from ChronasAdmin.models import Category, Brand, Product, Order, Coupon, SubCategory
@@ -421,7 +421,10 @@ def checkout(request):
         shipping_address=shipping_address,
         total_amount=total,
     )
-
+    Notification.objects.create(
+        title="New Order Received",
+        message=f"Order #{order.id} has been placed for {order.total_amount}"
+    )
     order_items = [
         OrderItem(
             order=order,
@@ -1753,3 +1756,23 @@ class CreateTabbyPayment(APIView):
                 {"error": str(e)},
                 status=500
             )
+        
+
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def get_notifications(request):
+
+    notifications = Notification.objects.all()
+
+    data = [
+        {
+            "id": n.id,
+            "title": n.title,
+            "message": n.message,
+            "is_read": n.is_read,
+            "created_at": n.created_at,
+        }
+        for n in notifications
+    ]
+
+    return Response(data)

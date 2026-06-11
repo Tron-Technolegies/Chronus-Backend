@@ -1053,6 +1053,7 @@ import json
 
 
 @require_http_methods(["POST"])
+@csrf_exempt
 def update_order_status(request, order_id):
 
     try:
@@ -1325,6 +1326,12 @@ from django.utils import timezone
 from datetime import timedelta
 from collections import defaultdict
 from .models import Order, OrderItem, Product, Supplier
+from collections import defaultdict
+from datetime import timedelta
+from django.db.models import Sum, Avg, F
+from django.http import JsonResponse
+from django.utils import timezone
+from django.views.decorators.http import require_http_methods
 
 
 @require_http_methods(["GET"])
@@ -1345,26 +1352,28 @@ def dashboard_stats(request):
 
     # REVENUE
 
-    total_revenue = Order.objects.filter(
-        status="completed"
-    ).aggregate(
-        total=Sum("total_amount")
-    )["total"] or 0
+    total_revenue = (
+        Order.objects.filter(status="completed")
+        .aggregate(total=Sum("total_amount"))["total"]
+        or 0
+    )
 
-    revenue_last_30_days = Order.objects.filter(
-        status="completed",
-        created_at__gte=last_30_days
-    ).aggregate(
-        total=Sum("total_amount")
-    )["total"] or 0
+    revenue_last_30_days = (
+        Order.objects.filter(
+            status="completed",
+            created_at__gte=last_30_days
+        ).aggregate(total=Sum("total_amount"))["total"]
+        or 0
+    )
 
-    revenue_previous_30_days = Order.objects.filter(
-        status="completed",
-        created_at__gte=previous_30_days,
-        created_at__lt=last_30_days
-    ).aggregate(
-        total=Sum("total_amount")
-    )["total"] or 0
+    revenue_previous_30_days = (
+        Order.objects.filter(
+            status="completed",
+            created_at__gte=previous_30_days,
+            created_at__lt=last_30_days
+        ).aggregate(total=Sum("total_amount"))["total"]
+        or 0
+    )
 
     growth_rate = 0
     if revenue_previous_30_days > 0:
@@ -1374,16 +1383,18 @@ def dashboard_stats(request):
         ) * 100
 
     # TODAY ORDERS
+
     today_orders = Order.objects.filter(
         created_at__date=today
     ).count()
 
     # AVERAGE ORDER VALUE
-    avg_order_value = Order.objects.filter(
-        status="completed"
-    ).aggregate(
-        avg=Avg("total_amount")
-    )["avg"] or 0
+
+    avg_order_value = (
+        Order.objects.filter(status="completed")
+        .aggregate(avg=Avg("total_amount"))["avg"]
+        or 0
+    )
 
     # LOW STOCK PRODUCTS
 
@@ -1415,13 +1426,22 @@ def dashboard_stats(request):
 
     category_revenue = defaultdict(float)
 
-    items = OrderItem.objects.filter(
-        order__status="completed"
-    ).select_related("product")
+    items = (
+        OrderItem.objects
+        .filter(order__status="completed")
+        .select_related("product", "product__category")
+    )
 
     for item in items:
-        category_name = item.product.category.name if item.product and item.product.category else "Unknown"
-        category_revenue[category_name] += float(item.get_total_price())
+        category_name = (
+            item.product.category.name
+            if item.product and item.product.category
+            else "Unknown"
+        )
+
+        category_revenue[category_name] += float(
+            item.get_total_price()
+        )
 
     category_revenue_data = [
         {"category": k, "revenue": v}
@@ -1429,23 +1449,32 @@ def dashboard_stats(request):
     ]
 
     # TOP SELLING PRODUCTS
+
     top_products = (
         OrderItem.objects
+        .filter(
+            order__status="completed",
+            product__isnull=False
+        )
+        .annotate(
+            product_name=F("product__name")
+        )
         .values("product_name")
-        .annotate(total_sold=Sum("quantity"))
+        .annotate(
+            total_sold=Sum("quantity")
+        )
         .order_by("-total_sold")[:5]
     )
 
-
     return JsonResponse({
         "cards": {
-            "total_revenue": total_revenue,
+            "total_revenue": float(total_revenue),
             "total_orders": total_orders,
             "completed_orders": completed_orders,
             "pending_orders": pending_orders,
             "shipped_orders": shipped_orders,
             "today_orders": today_orders,
-            "avg_order_value": avg_order_value,
+            "avg_order_value": float(avg_order_value),
             "low_stock_products": low_stock_products,
             "growth_rate": round(growth_rate, 2),
         },
@@ -1453,6 +1482,133 @@ def dashboard_stats(request):
         "category_revenue": category_revenue_data,
         "top_products": list(top_products),
     })
+
+# @require_http_methods(["GET"])
+# def dashboard_stats(request):
+
+#     now = timezone.now()
+#     today = now.date()
+#     last_30_days = now - timedelta(days=30)
+#     previous_30_days = now - timedelta(days=60)
+
+#     # BASIC COUNTS
+
+#     total_orders = Order.objects.count()
+
+#     completed_orders = Order.objects.filter(status="completed").count()
+#     pending_orders = Order.objects.filter(status="pending").count()
+#     shipped_orders = Order.objects.filter(status="shipped").count()
+
+#     # REVENUE
+
+#     total_revenue = Order.objects.filter(
+#         status="completed"
+#     ).aggregate(
+#         total=Sum("total_amount")
+#     )["total"] or 0
+
+#     revenue_last_30_days = Order.objects.filter(
+#         status="completed",
+#         created_at__gte=last_30_days
+#     ).aggregate(
+#         total=Sum("total_amount")
+#     )["total"] or 0
+
+#     revenue_previous_30_days = Order.objects.filter(
+#         status="completed",
+#         created_at__gte=previous_30_days,
+#         created_at__lt=last_30_days
+#     ).aggregate(
+#         total=Sum("total_amount")
+#     )["total"] or 0
+
+#     growth_rate = 0
+#     if revenue_previous_30_days > 0:
+#         growth_rate = (
+#             (revenue_last_30_days - revenue_previous_30_days)
+#             / revenue_previous_30_days
+#         ) * 100
+
+#     # TODAY ORDERS
+#     today_orders = Order.objects.filter(
+#         created_at__date=today
+#     ).count()
+
+#     # AVERAGE ORDER VALUE
+#     avg_order_value = Order.objects.filter(
+#         status="completed"
+#     ).aggregate(
+#         avg=Avg("total_amount")
+#     )["avg"] or 0
+
+#     # LOW STOCK PRODUCTS
+
+#     low_stock_products = Product.objects.filter(
+#         stock__lt=5
+#     ).count()
+
+#     # MONTHLY SALES (Last 6 Months)
+
+#     monthly_sales = defaultdict(float)
+
+#     six_months_ago = now - timedelta(days=180)
+
+#     orders = Order.objects.filter(
+#         status="completed",
+#         created_at__gte=six_months_ago
+#     )
+
+#     for order in orders:
+#         month_label = order.created_at.strftime("%b")
+#         monthly_sales[month_label] += float(order.total_amount)
+
+#     monthly_sales_data = [
+#         {"month": k, "revenue": v}
+#         for k, v in monthly_sales.items()
+#     ]
+
+#     # REVENUE BY CATEGORY
+
+#     category_revenue = defaultdict(float)
+
+#     items = OrderItem.objects.filter(
+#         order__status="completed"
+#     ).select_related("product")
+
+#     for item in items:
+#         category_name = item.product.category.name if item.product and item.product.category else "Unknown"
+#         category_revenue[category_name] += float(item.get_total_price())
+
+#     category_revenue_data = [
+#         {"category": k, "revenue": v}
+#         for k, v in category_revenue.items()
+#     ]
+
+#     # TOP SELLING PRODUCTS
+#     top_products = (
+#         OrderItem.objects
+#         .values("product_name")
+#         .annotate(total_sold=Sum("quantity"))
+#         .order_by("-total_sold")[:5]
+#     )
+
+
+#     return JsonResponse({
+#         "cards": {
+#             "total_revenue": total_revenue,
+#             "total_orders": total_orders,
+#             "completed_orders": completed_orders,
+#             "pending_orders": pending_orders,
+#             "shipped_orders": shipped_orders,
+#             "today_orders": today_orders,
+#             "avg_order_value": avg_order_value,
+#             "low_stock_products": low_stock_products,
+#             "growth_rate": round(growth_rate, 2),
+#         },
+#         "monthly_sales": monthly_sales_data,
+#         "category_revenue": category_revenue_data,
+#         "top_products": list(top_products),
+#     })
 
 
 from django.contrib.admin.views.decorators import staff_member_required
@@ -1922,3 +2078,5 @@ def delete_supplier(request, id):
     return JsonResponse({
         "message": "Supplier deleted successfully"
     })
+
+

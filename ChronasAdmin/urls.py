@@ -60,4 +60,6 @@ urlpatterns = [
     path("delete_supplier/<int:id>/", views.delete_supplier, name="delete_supplier"),
 
 
+    path("notifications/", views.get_notifications, name='get_notifications'),
+
 ]
