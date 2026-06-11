@@ -50,8 +50,6 @@ urlpatterns = [
     path("materials/delete/<int:material_id>/", views.delete_material, name="delete_material"),
     
 
-  
-
 
     path("supplier_list/", views.supplier_list, name="supplier_list"),
     path("add_supplier/", views.add_supplier, name="add_supplier"),
@@ -60,6 +58,6 @@ urlpatterns = [
     path("delete_supplier/<int:id>/", views.delete_supplier, name="delete_supplier"),
 
 
-    path("notifications/", views.get_notifications, name='get_notifications'),
+    path("notifications/", views.get_notifications, name="get_notifications"),
 
 ]

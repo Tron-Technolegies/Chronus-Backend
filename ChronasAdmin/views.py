@@ -11,6 +11,7 @@ import cloudinary.uploader
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from ChronasAdmin.models import Category, Brand, FineArtSize, Product, Order, Coupon, ProductImage, SubCategory
+from ChronasAdmin.shipping.unified import create_unified_shipment
 from ChronusUser.models import Cart, CartItem
 
 # Create your views here.
@@ -1051,9 +1052,8 @@ def view_orders(request):
 from django.utils import timezone
 import json
 
-
-@require_http_methods(["POST"])
 @csrf_exempt
+@require_http_methods(["POST"])
 def update_order_status(request, order_id):
 
     try:
@@ -1301,6 +1301,11 @@ def stripe_webhook(request):
             order.status = "processing"
             order.save()
 
+            Notification.objects.create(
+                title="Payment Received",
+                message=f"Payment received for Order #{order.id}. Amount: {order.total_amount}"
+            )
+
             print(f"✅ Order {order_id} marked paid")
 
             # ✅ CLEAR CART AFTER PAYMENT SUCCESS
@@ -1325,7 +1330,7 @@ from django.db.models import Sum, Avg, Count
 from django.utils import timezone
 from datetime import timedelta
 from collections import defaultdict
-from .models import Order, OrderItem, Product, Supplier
+from .models import Notification, Order, OrderItem, Product, Supplier
 from collections import defaultdict
 from datetime import timedelta
 from django.db.models import Sum, Avg, F
@@ -1698,7 +1703,7 @@ def delete_subcategory(request, pk):
 
 
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from django.contrib.auth import authenticate
 
@@ -1769,6 +1774,11 @@ def ziina_webhook(request):
             order.payment_id = data.get("id")
             order.status = "processing"
             order.save()
+
+            Notification.objects.create(
+                title="Payment Received",
+                message=f"Payment received for Order #{order.id}. Amount: {order.total_amount}"
+            )
 
             print(f"Ziina order {order_id} paid")
 
@@ -2080,3 +2090,21 @@ def delete_supplier(request, id):
     })
 
 
+@api_view(["GET"])
+@permission_classes([IsAdminUser])
+def get_notifications(request):
+
+    notifications = Notification.objects.all()
+
+    data = [
+        {
+            "id": n.id,
+            "title": n.title,
+            "message": n.message,
+            "is_read": n.is_read,
+            "created_at": n.created_at,
+        }
+        for n in notifications
+    ]
+
+    return Response(data)

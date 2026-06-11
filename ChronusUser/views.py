@@ -1758,21 +1758,3 @@ class CreateTabbyPayment(APIView):
             )
         
 
-@api_view(["GET"])
-@permission_classes([IsAdminUser])
-def get_notifications(request):
-
-    notifications = Notification.objects.all()
-
-    data = [
-        {
-            "id": n.id,
-            "title": n.title,
-            "message": n.message,
-            "is_read": n.is_read,
-            "created_at": n.created_at,
-        }
-        for n in notifications
-    ]
-
-    return Response(data)
