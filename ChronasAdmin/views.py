@@ -1170,26 +1170,38 @@ def update_order_status(request, order_id):
             status=500
         )
     
-
 @require_http_methods(["GET"])
 def order_detail_api(request, id):
     order = get_object_or_404(
-        Order.objects.select_related('user')
-        .prefetch_related('items__product', 'items__size', 'items__frame', 'items__material'),
+        Order.objects.select_related("user")
+        .prefetch_related(
+            "items__product__supplier",
+            "items__size",
+            "items__frame",
+            "items__material"
+        ),
         id=id
     )
 
     items = []
+
     for item in order.items.all():
         items.append({
             "product_name": item.product.name if item.product else None,
             "quantity": item.quantity,
             "price": float(item.price),
-            "total": float(item.get_total_amount()),
+            "total": float(item.quantity * item.price),
 
-            "size": item.size.name if item.size else None,
+            "size": item.size.size if item.size else None,
             "frame": item.frame.name if item.frame else None,
             "material": item.material.name if item.material else None,
+
+            "supplier": {
+                "id": item.product.supplier.id if item.product and item.product.supplier else None,
+                "name": item.product.supplier.name if item.product and item.product.supplier else None,
+                "email": item.product.supplier.email if item.product and item.product.supplier else None,
+                "phone": item.product.supplier.phone if item.product and item.product.supplier else None,
+            }
         })
 
     data = {
@@ -1199,10 +1211,46 @@ def order_detail_api(request, id):
         "status": order.status,
         "total_price": float(order.total_amount),
         "tracking_url": order.tracking_link,
+        "tracking_number": order.tracking_number,
+        "carrier": order.carrier,
         "items": items
     }
 
     return JsonResponse(data)
+
+# @require_http_methods(["GET"])
+# def order_detail_api(request, id):
+#     order = get_object_or_404(
+#         Order.objects.select_related('user')
+#         .prefetch_related('items__product', 'items__size', 'items__frame', 'items__material'),
+#         id=id
+#     )
+
+#     items = []
+#     for item in order.items.all():
+#         items.append({
+#             "product_name": item.product.name if item.product else None,
+#             "quantity": item.quantity,
+#             "price": float(item.price),
+#             "total": float(item.get_total_amount()),
+
+#             "size": item.size.name if item.size else None,
+#             "frame": item.frame.name if item.frame else None,
+#             "material": item.material.name if item.material else None,
+#         })
+
+#     data = {
+#         "id": order.id,
+#         "customer": order.user.email if order.user else "Guest",
+#         "date": order.created_at,
+#         "status": order.status,
+#         # "total_price": float(order.total_amount),
+#         "total": float(item.quantity * item.price),
+#         "tracking_url": order.tracking_link,
+#         "items": items
+#     }
+
+#     return JsonResponse(data)
 
     
 @csrf_exempt
