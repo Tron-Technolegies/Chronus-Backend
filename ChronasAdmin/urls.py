@@ -59,5 +59,8 @@ urlpatterns = [
 
 
     path("notifications/", views.get_notifications, name="get_notifications"),
+    path("create_shipment/<int:order_id>/",views.create_shipment,name="create_shipment"),
+
+
 
 ]
