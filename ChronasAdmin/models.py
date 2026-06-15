@@ -132,6 +132,8 @@ class Order(models.Model):
     shipping_address = models.TextField(default='null')
 
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    currency = models.CharField(max_length=10,default="USD")
+    
     payment_status = models.CharField(max_length=20, default="pending")
     payment_id = models.CharField(max_length=200, null=True, blank=True)
 
@@ -188,3 +190,5 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+

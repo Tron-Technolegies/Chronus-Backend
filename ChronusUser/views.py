@@ -110,10 +110,14 @@ def add_to_cart(request):
 
     return Response({"message": "Added to cart"})
 
-
+from ChronusUser.currency import convert_price
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def view_cart(request):
+    currency = request.GET.get(
+        "currency",
+        "USD"
+    ).upper()
     cart = get_cart(request)
 
     items = CartItem.objects.select_related(
@@ -124,14 +128,23 @@ def view_cart(request):
     data = []
 
     for item in items:
-        total = item.quantity * item.price
+        converted_price = convert_price(
+            item.price,
+            currency
+        )
+        total = converted_price * item.quantity
         subtotal += total
 
         data.append({
             "id": item.id,
             "product_id": item.product.id,
             "product": item.product.name,
-            "price": item.price,
+            # "price": item.price,
+            "price": round(
+                converted_price,
+                2
+            ),
+            "currency": currency,
             "size": item.size.size if item.size else None,
             "frame": item.frame.name if item.frame else None,
             "material": item.material.name if item.material else None,
@@ -141,107 +154,14 @@ def view_cart(request):
         })
 
     return Response({
+        "currency": currency,
         "items": data,
-        "subtotal": subtotal
+        "subtotal": round(
+            subtotal,
+            2
+        )
     })
 
-
-# @api_view(["POST"])
-# @permission_classes([AllowAny])
-# def add_to_cart(request):
-#     product_id = request.data.get("product_id")
-#     qty = int(request.data.get("quantity", 1))
-#     size_id = request.data.get("size_id")
-#     frame_id = request.data.get("frame_id")
-#     material_id = request.data.get("material_id")
-
-#     if not product_id:
-#         return Response({"error": "product_id required"}, status=400)
-
-#     if qty <= 0:
-#         return Response({"error": "Invalid quantity"}, status=400)
-
-#     cart = get_cart(request)
-#     product = get_object_or_404(Product, id=product_id)
-#     size = None
-#     frame = None
-#     material = None
-
-#     price = product.price
-#     # if fine art options exist
-#     if size_id:
-#         size = get_object_or_404(FineArtSize, id=size_id)
-#         price = size.price
-
-#     if frame_id:
-#         frame = get_object_or_404(Frame, id=frame_id)
-#         price += frame.extra_price
-
-#     if material_id:
-#         material = get_object_or_404(Material, id=material_id)
-#         price += material.extra_price
-
-#     item, created = CartItem.objects.get_or_create(
-#         cart=cart, 
-#         product=product,
-#         size=size,
-#         frame=frame,
-#         material=material,
-#         defaults={
-#             "quantity": qty,
-#             "price": price
-#         })
-
-#     # if not created:
-#     #     item.quantity += qty
-#     # else:
-#     #     item.quantity = qty
-#     #     item.price = price
-#     if not created:
-#             item.quantity += qty
-#             item.price = price
-#             item.save()
-
-
-#     # item.save()
-
-#     return Response({"message": "Added to cart"})
-
-
-# @api_view(["GET"])
-# @permission_classes([AllowAny])
-# def view_cart(request):
-#     cart = get_cart(request)
-#     # items = CartItem.objects.select_related("product").filter(cart=cart)
-#     items = CartItem.objects.select_related(
-#     "product", "size", "frame", "material"
-# ).filter(cart=cart)
-#     subtotal = 0
-
-#     data = []
-
-#     for item in items:
-#         # total = item.quantity * item.product.price
-#         total = item.quantity * item.price
-#         subtotal += total
-
-#         data.append({
-#             "product_id": item.product.id,
-#             "product": item.product.name,
-#             # "price": item.product.price,
-#             "price": item.price,
-#             "size": item.size.size if item.size else None,
-#             "frame": item.frame.name if item.frame else None,
-#             "material": item.material.name if item.material else None,
-#             "image": item.product.image.url if item.product.image else None,
-#             "quantity": item.quantity,
-#             "total": total
-#         })
-
-#     return Response({
-#         "items": data,
-#         "subtotal": subtotal
-#     })
 
 @api_view(["DELETE"])
 @permission_classes([AllowAny])
@@ -383,6 +303,10 @@ def add_review(request):
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def checkout(request):
+    currency = request.data.get(
+            "currency",
+            "USD"
+        ).upper()
     cart = get_cart(request)
 
     items = CartItem.objects.select_related(
@@ -420,6 +344,7 @@ def checkout(request):
         phone=request.data.get("phone"),
         shipping_address=shipping_address,
         total_amount=total,
+        currency=currency
     )
     Notification.objects.create(
         title="New Order Received",
@@ -439,7 +364,7 @@ def checkout(request):
     ]
     OrderItem.objects.bulk_create(order_items)
 
-    return Response({"order_id": order.id, "amount": total})
+    return Response({"order_id": order.id, "amount": total,  "currency": currency})
 # ===============================
 # USER ORDERS (AUTH)
 # ===============================
@@ -459,33 +384,47 @@ def my_orders(request):
             items.append({
                 "product_name": item.product.name,
                 "quantity": item.quantity,
-                "price": str(item.price),
+                # "price": str(item.price),
+                "price": convert_price(
+                    item.price,
+                    order.currency
+                ),
+                "currency": order.currency
             })
 
         data.append({
             "id": order.id,
             "status": order.status,
-            "total_amount": str(order.total_amount),
+            # "total_amount": str(order.total_amount),
+            "total_amount": convert_price(
+                order.total_amount,
+                order.currency
+            ),
+            "currency": order.currency,
             "created_at": order.created_at,
             "items": items
         })
 
     return Response({"orders": data})
 
-from .currency import convert_amount
 
+from .currency import convert_amount
 class CreatePaymentIntentView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
         try:
-            order_id = request.data.get("order_id")
-            currency = request.data.get("currency", "usd").lower()
-            
+            order_id = request.data.get(id=order_id)
             if not order_id:
-                return Response({"error": "order_id required"}, status=400)
-
+                return Response(
+                    {"error":"order_id required"},
+                    status=400
+                )
             order = Order.objects.get(id=order_id)
+            
+            # currency = request.data.get("currency", "usd").lower()
+            currency = order.currency.lower()
+        
 
             # ✅ SECURITY CHECK
 
@@ -599,14 +538,184 @@ def login(request):
         "tokens": tokens
     })
 
-# from django.db.models import Q
-# from django.http import JsonResponse
-# from django.views.decorators.csrf import csrf_exempt
-# from django.views.decorators.http import require_http_methods
+from django.db.models import Q, Avg, Count
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+from ChronusUser.currency import convert_price
+@csrf_exempt
+@require_http_methods(["GET"])
+def view_products(request):
+    category = request.GET.get("category")
+    subcategory = request.GET.get("subcategory")
+    search = request.GET.get("search")
+    min_price = request.GET.get("min_price")
+    max_price = request.GET.get("max_price")
+
+    currency = request.GET.get("currency", "USD").upper()   #newwww
+
+    try:
+        page = int(request.GET.get("page", 1))
+        limit = int(request.GET.get("limit", 12))
+    except ValueError:
+        return JsonResponse({"error": "Invalid pagination values"}, status=400)
+
+    if page < 1 or limit < 1:
+        return JsonResponse({"error": "Page and limit must be greater than 0"}, status=400)
+
+    offset = (page - 1) * limit
+
+    products = Product.objects.select_related(
+        "category", "subcategory", "brand"
+    ).prefetch_related(
+        "sizes",
+        "colors",
+        "gallery",
+        "frames",
+        "materials"
+    )
+
+    # CATEGORY FILTER
+    if category:
+        if category.isdigit():
+            products = products.filter(category__id=category)
+        else:
+            products = products.filter(category__name__icontains=category)
+
+    # SUBCATEGORY FILTER
+    if subcategory:
+        if subcategory.isdigit():
+            products = products.filter(subcategory__id=subcategory)
+        else:
+            products = products.filter(subcategory__name__icontains=subcategory)
+
+    # SEARCH
+    if search:
+        products = products.filter(
+            Q(name__icontains=search) |
+            Q(brand__name__icontains=search) |
+            Q(category__name__icontains=search) |
+            Q(subcategory__name__icontains=search)
+        )
+
+    # PRICE FILTER
+    if min_price:
+        products = products.filter(price__gte=min_price)
+
+    if max_price:
+        products = products.filter(price__lte=max_price)
+
+    total_products = products.count()
+    total_pages = (total_products + limit - 1) // limit
+
+    products = products[offset:offset + limit]
+
+    data = []
+
+    for product in products:
+        data.append({
+            "id": product.id,
+            "name": product.name,
+
+            "category": {
+                "id": product.category.id,
+                "name": product.category.name
+            } if product.category else None,
+
+            "subcategory": {
+                "id": product.subcategory.id,
+                "name": product.subcategory.name
+            } if product.subcategory else None,
+
+            "brand": {
+                "id": product.brand.id,
+                "name": product.brand.name
+            } if product.brand else None,
+
+            # "price": str(product.price),
+            "price": convert_price(
+                product.price,
+                currency
+            ),
+            "currency": currency,
+            "description": product.description,
+            "stock": product.stock,
+            "image": product.image.url if product.image else None,
+            "created_at": product.created_at,
+            "is_featured": product.is_featured,
+            "is_best_seller": product.is_best_seller,
+            "specification": product.specification,
+
+            "sizes": [
+                {
+                    "size": s.size,
+                    # "price": str(s.price)
+                    "price": convert_price(
+                        s.price,
+                        currency
+                    )
+                }
+                for s in product.sizes.all()
+            ],
+
+            "colors": [
+                {
+                    "id": c.id,
+                    "color_name": c.color_name,
+                    "image": c.image.url if c.image else None
+                }
+                for c in product.colors.all()
+            ],
+
+            "gallery": [
+                img.image.url
+                for img in product.gallery.all()
+                if img.image
+            ],
+
+            "frames": [
+                {
+                    "id": f.id,
+                    "name": f.name,
+                    "extra_price": convert_price(
+                    f.extra_price,
+                    currency
+                ) if f.extra_price is not None else None,
+                    "image": f.image.url if getattr(f, "image", None) else None
+                }
+                for f in product.frames.all()
+            ],
+
+            "materials": [
+                {
+                    "id": m.id,
+                    "name": m.name,
+                    "description": m.description,
+                    "extra_price": convert_price(
+                        m.extra_price,
+                        currency
+                    ) if m.extra_price is not None else None
+                }
+                for m in product.materials.all()
+            ]
+        })
+
+    return JsonResponse({
+        "page": page,
+        "limit": limit,
+        "total_products": total_products,
+        "total_pages": total_pages,
+        "products": data
+    }, status=200)
+
+from django.db.models import Q, Avg, Count
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+
 # @csrf_exempt
 # @require_http_methods(["GET"])
 # def view_products(request):
-
 #     category = request.GET.get("category")
 #     subcategory = request.GET.get("subcategory")
 #     search = request.GET.get("search")
@@ -619,6 +728,9 @@ def login(request):
 #     except ValueError:
 #         return JsonResponse({"error": "Invalid pagination values"}, status=400)
 
+#     if page < 1 or limit < 1:
+#         return JsonResponse({"error": "Page and limit must be greater than 0"}, status=400)
+
 #     offset = (page - 1) * limit
 
 #     products = Product.objects.select_related(
@@ -626,7 +738,9 @@ def login(request):
 #     ).prefetch_related(
 #         "sizes",
 #         "colors",
-#         "gallery"
+#         "gallery",
+#         "frames",
+#         "materials"
 #     )
 
 #     # CATEGORY FILTER
@@ -660,16 +774,15 @@ def login(request):
 #         products = products.filter(price__lte=max_price)
 
 #     total_products = products.count()
+#     total_pages = (total_products + limit - 1) // limit
 
 #     products = products[offset:offset + limit]
 
 #     data = []
 
 #     for product in products:
-
 #         data.append({
 #             "id": product.id,
-
 #             "name": product.name,
 
 #             "category": {
@@ -688,17 +801,12 @@ def login(request):
 #             } if product.brand else None,
 
 #             "price": str(product.price),
-
+#             "description": product.description,
 #             "stock": product.stock,
-
 #             "image": product.image.url if product.image else None,
-
 #             "created_at": product.created_at,
-
 #             "is_featured": product.is_featured,
-
 #             "is_best_seller": product.is_best_seller,
-
 #             "specification": product.specification,
 
 #             "sizes": [
@@ -711,6 +819,7 @@ def login(request):
 
 #             "colors": [
 #                 {
+#                     "id": c.id,
 #                     "color_name": c.color_name,
 #                     "image": c.image.url if c.image else None
 #                 }
@@ -721,6 +830,26 @@ def login(request):
 #                 img.image.url
 #                 for img in product.gallery.all()
 #                 if img.image
+#             ],
+
+#             "frames": [
+#                 {
+#                     "id": f.id,
+#                     "name": f.name,
+#                     "extra_price": str(f.extra_price) if f.extra_price is not None else None,
+#                     "image": f.image.url if getattr(f, "image", None) else None
+#                 }
+#                 for f in product.frames.all()
+#             ],
+
+#             "materials": [
+#                 {
+#                     "id": m.id,
+#                     "name": m.name,
+#                     "description": m.description,
+#                     "extra_price": str(m.extra_price) if m.extra_price is not None else None
+#                 }
+#                 for m in product.materials.all()
 #             ]
 #         })
 
@@ -728,390 +857,19 @@ def login(request):
 #         "page": page,
 #         "limit": limit,
 #         "total_products": total_products,
-#         "total_pages": (total_products + limit - 1) // limit,
+#         "total_pages": total_pages,
 #         "products": data
-#     }, status=200)
+#     }, status=200)      
 
-# @csrf_exempt
-# @require_http_methods(["GET"])
-# def view_single_product(request, product_id):
-#     try:
-#         product = Product.objects.select_related(
-#             "category", "subcategory", "brand"
-#         ).prefetch_related("gallery","sizes").get(id=product_id)
-#         reviews_qs = Review.objects.filter(product=product).order_by("-created_at")
-#         rating_summary = reviews_qs.aggregate(
-#             avg_rating=Avg("rating"),
-#             total_reviews=Count("id")
-#         )
-
-#         data = {
-#             "id": product.id,
-#             "name": product.name,
-
-#             "category": {
-#                 "id": product.category.id,
-#                 "name": product.category.name
-#             } if product.category else None,
-
-#             "subcategory": {
-#                 "id": product.subcategory.id,
-#                 "name": product.subcategory.name
-#             } if getattr(product, "subcategory", None) else None,
-
-#             "brand": {
-#                 "id": product.brand.id,
-#                 "name": product.brand.name
-#             } if product.brand else None,
-
-#             "price": str(product.price),
-#             "description": product.description,
-#             "stock": product.stock,
-#             "image": product.image.url if product.image else None,
-#             "gallery": [img.image.url for img in product.gallery.all()],
-#             "is_featured": product.is_featured,
-#             "is_best_seller": product.is_best_seller,
-#             "created_at": product.created_at,
-#             "specification": product.specification,   
-
-#             "sizes": [                                
-#                 {
-#                     "size": s.size,
-#                     "price": str(s.price)
-#                 }
-#                 for s in product.sizes.all()
-#             ],
-#             "average_rating": round(rating_summary["avg_rating"] or 0, 1),
-#             "review_count": rating_summary["total_reviews"],
-#             "reviews": [
-#                 {
-#                     "id": r.id,
-#                     "name": r.name,
-#                     "rating": r.rating,
-#                     "comment": r.comment,
-#                     "created_at": r.created_at,
-#                 }
-#                 for r in reviews_qs
-#             ]
-#         }
-
-#         return JsonResponse(data, status=200)
-
-#     except Product.DoesNotExist:
-#         return JsonResponse({"error": "Product not found"}, status=404)
-
-
-from django.db.models import Q, Avg, Count
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_http_methods
-
-@csrf_exempt
-@require_http_methods(["GET"])
-def view_products(request):
-    category = request.GET.get("category")
-    subcategory = request.GET.get("subcategory")
-    search = request.GET.get("search")
-    min_price = request.GET.get("min_price")
-    max_price = request.GET.get("max_price")
-
-    try:
-        page = int(request.GET.get("page", 1))
-        limit = int(request.GET.get("limit", 12))
-    except ValueError:
-        return JsonResponse({"error": "Invalid pagination values"}, status=400)
-
-    if page < 1 or limit < 1:
-        return JsonResponse({"error": "Page and limit must be greater than 0"}, status=400)
-
-    offset = (page - 1) * limit
-
-    products = Product.objects.select_related(
-        "category", "subcategory", "brand"
-    ).prefetch_related(
-        "sizes",
-        "colors",
-        "gallery",
-        "frames",
-        "materials"
-    )
-
-    # CATEGORY FILTER
-    if category:
-        if category.isdigit():
-            products = products.filter(category__id=category)
-        else:
-            products = products.filter(category__name__icontains=category)
-
-    # SUBCATEGORY FILTER
-    if subcategory:
-        if subcategory.isdigit():
-            products = products.filter(subcategory__id=subcategory)
-        else:
-            products = products.filter(subcategory__name__icontains=subcategory)
-
-    # SEARCH
-    if search:
-        products = products.filter(
-            Q(name__icontains=search) |
-            Q(brand__name__icontains=search) |
-            Q(category__name__icontains=search) |
-            Q(subcategory__name__icontains=search)
-        )
-
-    # PRICE FILTER
-    if min_price:
-        products = products.filter(price__gte=min_price)
-
-    if max_price:
-        products = products.filter(price__lte=max_price)
-
-    total_products = products.count()
-    total_pages = (total_products + limit - 1) // limit
-
-    products = products[offset:offset + limit]
-
-    data = []
-
-    for product in products:
-        data.append({
-            "id": product.id,
-            "name": product.name,
-
-            "category": {
-                "id": product.category.id,
-                "name": product.category.name
-            } if product.category else None,
-
-            "subcategory": {
-                "id": product.subcategory.id,
-                "name": product.subcategory.name
-            } if product.subcategory else None,
-
-            "brand": {
-                "id": product.brand.id,
-                "name": product.brand.name
-            } if product.brand else None,
-
-            "price": str(product.price),
-            "description": product.description,
-            "stock": product.stock,
-            "image": product.image.url if product.image else None,
-            "created_at": product.created_at,
-            "is_featured": product.is_featured,
-            "is_best_seller": product.is_best_seller,
-            "specification": product.specification,
-
-            "sizes": [
-                {
-                    "size": s.size,
-                    "price": str(s.price)
-                }
-                for s in product.sizes.all()
-            ],
-
-            "colors": [
-                {
-                    "id": c.id,
-                    "color_name": c.color_name,
-                    "image": c.image.url if c.image else None
-                }
-                for c in product.colors.all()
-            ],
-
-            "gallery": [
-                img.image.url
-                for img in product.gallery.all()
-                if img.image
-            ],
-
-            "frames": [
-                {
-                    "id": f.id,
-                    "name": f.name,
-                    "extra_price": str(f.extra_price) if f.extra_price is not None else None,
-                    "image": f.image.url if getattr(f, "image", None) else None
-                }
-                for f in product.frames.all()
-            ],
-
-            "materials": [
-                {
-                    "id": m.id,
-                    "name": m.name,
-                    "description": m.description,
-                    "extra_price": str(m.extra_price) if m.extra_price is not None else None
-                }
-                for m in product.materials.all()
-            ]
-        })
-
-    return JsonResponse({
-        "page": page,
-        "limit": limit,
-        "total_products": total_products,
-        "total_pages": total_pages,
-        "products": data
-    }, status=200)
-
-from django.db.models import Q, Avg, Count
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_http_methods
-
-@csrf_exempt
-@require_http_methods(["GET"])
-def view_products(request):
-    category = request.GET.get("category")
-    subcategory = request.GET.get("subcategory")
-    search = request.GET.get("search")
-    min_price = request.GET.get("min_price")
-    max_price = request.GET.get("max_price")
-
-    try:
-        page = int(request.GET.get("page", 1))
-        limit = int(request.GET.get("limit", 12))
-    except ValueError:
-        return JsonResponse({"error": "Invalid pagination values"}, status=400)
-
-    if page < 1 or limit < 1:
-        return JsonResponse({"error": "Page and limit must be greater than 0"}, status=400)
-
-    offset = (page - 1) * limit
-
-    products = Product.objects.select_related(
-        "category", "subcategory", "brand"
-    ).prefetch_related(
-        "sizes",
-        "colors",
-        "gallery",
-        "frames",
-        "materials"
-    )
-
-    # CATEGORY FILTER
-    if category:
-        if category.isdigit():
-            products = products.filter(category__id=category)
-        else:
-            products = products.filter(category__name__icontains=category)
-
-    # SUBCATEGORY FILTER
-    if subcategory:
-        if subcategory.isdigit():
-            products = products.filter(subcategory__id=subcategory)
-        else:
-            products = products.filter(subcategory__name__icontains=subcategory)
-
-    # SEARCH
-    if search:
-        products = products.filter(
-            Q(name__icontains=search) |
-            Q(brand__name__icontains=search) |
-            Q(category__name__icontains=search) |
-            Q(subcategory__name__icontains=search)
-        )
-
-    # PRICE FILTER
-    if min_price:
-        products = products.filter(price__gte=min_price)
-
-    if max_price:
-        products = products.filter(price__lte=max_price)
-
-    total_products = products.count()
-    total_pages = (total_products + limit - 1) // limit
-
-    products = products[offset:offset + limit]
-
-    data = []
-
-    for product in products:
-        data.append({
-            "id": product.id,
-            "name": product.name,
-
-            "category": {
-                "id": product.category.id,
-                "name": product.category.name
-            } if product.category else None,
-
-            "subcategory": {
-                "id": product.subcategory.id,
-                "name": product.subcategory.name
-            } if product.subcategory else None,
-
-            "brand": {
-                "id": product.brand.id,
-                "name": product.brand.name
-            } if product.brand else None,
-
-            "price": str(product.price),
-            "description": product.description,
-            "stock": product.stock,
-            "image": product.image.url if product.image else None,
-            "created_at": product.created_at,
-            "is_featured": product.is_featured,
-            "is_best_seller": product.is_best_seller,
-            "specification": product.specification,
-
-            "sizes": [
-                {
-                    "size": s.size,
-                    "price": str(s.price)
-                }
-                for s in product.sizes.all()
-            ],
-
-            "colors": [
-                {
-                    "id": c.id,
-                    "color_name": c.color_name,
-                    "image": c.image.url if c.image else None
-                }
-                for c in product.colors.all()
-            ],
-
-            "gallery": [
-                img.image.url
-                for img in product.gallery.all()
-                if img.image
-            ],
-
-            "frames": [
-                {
-                    "id": f.id,
-                    "name": f.name,
-                    "extra_price": str(f.extra_price) if f.extra_price is not None else None,
-                    "image": f.image.url if getattr(f, "image", None) else None
-                }
-                for f in product.frames.all()
-            ],
-
-            "materials": [
-                {
-                    "id": m.id,
-                    "name": m.name,
-                    "description": m.description,
-                    "extra_price": str(m.extra_price) if m.extra_price is not None else None
-                }
-                for m in product.materials.all()
-            ]
-        })
-
-    return JsonResponse({
-        "page": page,
-        "limit": limit,
-        "total_products": total_products,
-        "total_pages": total_pages,
-        "products": data
-    }, status=200)      
-
-
+from ChronusUser.currency import convert_price
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_single_product(request, product_id):
     try:
+        currency = request.GET.get(
+            "currency",
+            "USD"
+        ).upper()
         product = Product.objects.select_related(
             "category", "subcategory", "brand"
         ).prefetch_related(
@@ -1148,7 +906,12 @@ def view_single_product(request, product_id):
                 "name": product.brand.name
             } if product.brand else None,
 
-            "price": str(product.price),
+            # "price": str(product.price),
+            "price": convert_price(
+                product.price,
+                currency
+            ),
+            "currency": currency,
             "description": product.description,
             "stock": product.stock,
             "image": product.image.url if product.image else None,
@@ -1168,7 +931,10 @@ def view_single_product(request, product_id):
                 {
                     "id": s.id,
                     "size": s.size,
-                    "price": str(s.price)
+                    "price": convert_price(
+                    s.price,
+                    currency
+                )
                 }
                 for s in product.sizes.all()
             ],
@@ -1186,7 +952,15 @@ def view_single_product(request, product_id):
                 {
                     "id": f.id,
                     "name": f.name,
-                    "extra_price": str(f.extra_price) if f.extra_price is not None else None,
+                    # "extra_price": str(f.extra_price) if f.extra_price is not None else None,
+                    "extra_price": (
+                    convert_price(
+                        f.extra_price,
+                        currency
+                    )
+                    if f.extra_price is not None
+                    else None
+                ),
                     "image": f.image.url if getattr(f, "image", None) else None
                 }
                 for f in product.frames.all()
@@ -1197,7 +971,16 @@ def view_single_product(request, product_id):
                     "id": m.id,
                     "name": m.name,
                     "description": m.description,
-                    "extra_price": str(m.extra_price) if m.extra_price is not None else None
+                    # "extra_price": str(m.extra_price) if m.extra_price is not None else None
+                    "extra_price": (
+                        convert_price(
+                            m.extra_price,
+                            currency
+                        )
+                        if m.extra_price is not None
+                        else None
+                    )
+                    
                 }
                 for m in product.materials.all()
             ],
@@ -1333,6 +1116,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from django.conf import settings
 from ChronasAdmin.models import Order
+from .currency import convert_amount
 
 class CreateZiinaPayment(APIView):
     permission_classes = [AllowAny]
@@ -1363,11 +1147,24 @@ class CreateZiinaPayment(APIView):
                 "Authorization": f"Bearer {settings.ZIINA_API_KEY}",
                 "Content-Type": "application/json"
             }
-
+            currency = order.currency.upper()
+            if currency != "AED":
+                return Response(
+                    {
+                        "error": "Ziina currently supports AED payments only"
+                    },
+                    status=400
+                )
             payload = {
-                "amount": int(order.total_amount * 100),
-                "currency_code": "AED",
+                "amount": convert_amount(
+                    order.total_amount,
+                    currency
+                ),
+
+                "currency_code": currency,
+
                 "message": f"Order {order.id}",
+
                 "metadata": {
                     "order_id": str(order.id)
                 }
@@ -1376,6 +1173,14 @@ class CreateZiinaPayment(APIView):
             response = requests.post(url, json=payload, headers=headers)
 
             data = response.json()
+
+            if response.status_code not in [200, 201]:
+                return Response(
+                    {
+                        "error": data
+                    },
+                    status=response.status_code
+                )
 
             return Response({
                 "payment_url": data.get("redirect_url")
@@ -1393,12 +1198,18 @@ class CreateZiinaPayment(APIView):
 
 from django.http import JsonResponse
 from ChronasAdmin.models import FineArtSize, Frame, Material
+from ChronusUser.currency import convert_price
 
 def calculate_price(request):
 
     size_id = request.GET.get("size")
     frame_id = request.GET.get("frame")
     material_id = request.GET.get("material")
+
+    currency = request.GET.get(
+        "currency",
+        "USD"
+    ).upper()
 
     size = FineArtSize.objects.get(id=size_id)
     frame = Frame.objects.get(id=frame_id)
@@ -1407,7 +1218,11 @@ def calculate_price(request):
     price = size.price + frame.extra_price + material.extra_price
 
     return JsonResponse({
-        "price": price
+        "price": convert_price(
+            price,
+            currency
+        ),
+        "currency": currency
     })
 
 
@@ -1422,6 +1237,13 @@ def track_order(request, order_id):
         "order_id": order.id,
 
         "status": order.status,
+
+        "currency": order.currency,
+
+        "total_amount": convert_price(
+            order.total_amount,
+            order.currency
+        ),
 
         "tracking_link": order.tracking_link,
 
@@ -1581,6 +1403,184 @@ def track_order(request, order_id):
 #                 status=500
 #             )
         
+# class CreateTabbyPayment(APIView):
+#     permission_classes = [AllowAny]
+
+#     def post(self, request):
+#         try:
+#             order_id = request.data.get("order_id")
+
+#             if not order_id:
+#                 return Response(
+#                     {"error": "order_id required"},
+#                     status=400
+#                 )
+
+#             order = Order.objects.get(id=order_id)
+
+#             # SECURITY CHECK
+#             if request.user.is_authenticated:
+
+#                 if order.user != request.user:
+#                     return Response(
+#                         {"error": "Unauthorized order access"},
+#                         status=403
+#                     )
+
+#             else:
+#                 guest_id = request.headers.get("X-Guest-Id")
+
+#                 print("Order Guest ID:", order.guest_id)
+#                 print("Header Guest ID:", guest_id)
+
+#                 if not guest_id or order.guest_id != guest_id:
+#                     return Response(
+#                         {"error": "Unauthorized guest order"},
+#                         status=403
+#                     )
+
+#             url = "https://api.tabby.ai/api/v2/checkout"
+
+#             headers = {
+#                 "Authorization": f"Bearer {settings.TABBY_SECRET_KEY}",
+#                 "Content-Type": "application/json"
+#             }
+
+#             payload = {
+#                 "payment": {
+#                     "amount": float(order.total_amount),
+#                     "currency": "AED",
+#                     "description": f"Order #{order.id}",
+#                     "buyer": {
+#                         "email": order.email,
+#                         "phone": order.phone,
+#                         "name": request.data.get("name", "Customer")
+#                     },
+#                     "order": {
+#                         "reference_id": str(order.id),
+#                         "items": [
+#                             {
+#                                 "title": item.product.name if item.product else "Product",
+#                                 "quantity": item.quantity,
+#                                 "unit_price": float(item.price),
+#                                 "category": (
+#                                     item.product.category.name
+#                                     if item.product and item.product.category
+#                                     else "General"
+#                                 )
+#                             }
+#                             for item in order.items.all()
+#                         ]
+#                     },
+#                     "shipping_address": {
+#                         "address": order.shipping_address,
+#                         "city": request.data.get("city", ""),
+#                         "country": request.data.get("country", "AE")
+#                     },
+#                     "buyer_history": {
+#                         "registered_since": "2024-01-01",
+#                         "loyalty_level": 0
+#                     }
+#                 },
+#                 "lang": "en",
+#                 "merchant_code": "VVAE",
+#                 "merchant_urls": {
+#                     "success": "https://chronosgallery.com/payment-success",
+#                     "cancel": "https://chronosgallery.com/payment-cancel",
+#                     "failure": "https://chronosgallery.com/payment-failure"
+#                 }
+#             }
+
+#             # DEBUGGING
+#             if not settings.TABBY_SECRET_KEY:
+#                 return Response(
+#                     {"error": "TABBY_SECRET_KEY is empty"},
+#                     status=500
+#                 )
+
+#             print("\n================ TABBY REQUEST ================")
+#             print("URL:")
+#             print(url)
+
+#             print("\nSECRET KEY:")
+#             print(repr(settings.TABBY_SECRET_KEY))
+
+#             print("\nHEADERS:")
+#             print(headers)
+
+#             print("\nPAYLOAD:")
+#             print(payload)
+
+#             response = requests.post(
+#                 url,
+#                 json=payload,
+#                 headers=headers,
+#                 timeout=30
+#             )
+
+#             print("\n================ TABBY RESPONSE ================")
+
+#             print("STATUS CODE:")
+#             print(response.status_code)
+
+#             print("\nRESPONSE HEADERS:")
+#             print(dict(response.headers))
+
+#             print("\nRESPONSE BODY:")
+#             print(repr(response.text))
+
+#             print("\n================================================")
+
+#             try:
+#                 data = response.json()
+#             except Exception as json_error:
+#                 print("JSON PARSE ERROR:", str(json_error))
+
+#                 return Response(
+#                     {
+#                         "error": "Tabby returned non-JSON response",
+#                         "status_code": response.status_code,
+#                         "response": response.text,
+#                         "headers": dict(response.headers)
+#                     },
+#                     status=500
+#                 )
+
+#             if response.status_code not in [200, 201]:
+#                 return Response(
+#                     {
+#                         "error": data,
+#                         "status_code": response.status_code
+#                     },
+#                     status=400
+#                 )
+
+#             return Response({
+#                 "payment_id": data.get("id"),
+#                 "payment_url": data.get("configuration", {})
+#                                   .get("available_products", {})
+#                                   .get("installments", {})
+#                                   .get("web_url"),
+#                 "full_response": data
+#             })
+
+#         except Order.DoesNotExist:
+#             return Response(
+#                 {"error": "Invalid order"},
+#                 status=404
+#             )
+
+#         except Exception as e:
+#             import traceback
+#             traceback.print_exc()
+
+#             return Response(
+#                 {"error": str(e)},
+#                 status=500
+#             )
+        
+from .currency import convert_amount
+
 class CreateTabbyPayment(APIView):
     permission_classes = [AllowAny]
 
@@ -1608,14 +1608,30 @@ class CreateTabbyPayment(APIView):
             else:
                 guest_id = request.headers.get("X-Guest-Id")
 
-                print("Order Guest ID:", order.guest_id)
-                print("Header Guest ID:", guest_id)
-
                 if not guest_id or order.guest_id != guest_id:
                     return Response(
                         {"error": "Unauthorized guest order"},
                         status=403
                     )
+
+            currency = order.currency.upper()
+
+            # Remove this block if your Tabby account supports multiple currencies
+            if currency != "AED":
+                return Response(
+                    {
+                        "error": "Tabby currently supports AED payments only"
+                    },
+                    status=400
+                )
+
+            total_amount = round(
+                convert_amount(
+                    order.total_amount,
+                    currency
+                ) / 100,
+                2
+            )
 
             url = "https://api.tabby.ai/api/v2/checkout"
 
@@ -1626,42 +1642,67 @@ class CreateTabbyPayment(APIView):
 
             payload = {
                 "payment": {
-                    "amount": float(order.total_amount),
-                    "currency": "AED",
+                    "amount": total_amount,
+                    "currency": currency,
                     "description": f"Order #{order.id}",
+
                     "buyer": {
                         "email": order.email,
                         "phone": order.phone,
-                        "name": request.data.get("name", "Customer")
+                        "name": request.data.get(
+                            "name",
+                            "Customer"
+                        )
                     },
+
                     "order": {
                         "reference_id": str(order.id),
+
                         "items": [
                             {
-                                "title": item.product.name if item.product else "Product",
+                                "title": (
+                                    item.product.name
+                                    if item.product
+                                    else "Product"
+                                ),
+
                                 "quantity": item.quantity,
-                                "unit_price": float(item.price),
+
+                                "unit_price": round(
+                                    convert_amount(
+                                        item.price,
+                                        currency
+                                    ) / 100,
+                                    2
+                                ),
+
                                 "category": (
                                     item.product.category.name
-                                    if item.product and item.product.category
+                                    if item.product
+                                    and item.product.category
                                     else "General"
                                 )
                             }
                             for item in order.items.all()
                         ]
                     },
+
                     "shipping_address": {
                         "address": order.shipping_address,
                         "city": request.data.get("city", ""),
                         "country": request.data.get("country", "AE")
                     },
+
                     "buyer_history": {
                         "registered_since": "2024-01-01",
                         "loyalty_level": 0
                     }
                 },
+
                 "lang": "en",
+
                 "merchant_code": "VVAE",
+
                 "merchant_urls": {
                     "success": "https://chronosgallery.com/payment-success",
                     "cancel": "https://chronosgallery.com/payment-cancel",
@@ -1669,25 +1710,13 @@ class CreateTabbyPayment(APIView):
                 }
             }
 
-            # DEBUGGING
-            if not settings.TABBY_SECRET_KEY:
-                return Response(
-                    {"error": "TABBY_SECRET_KEY is empty"},
-                    status=500
-                )
-
-            print("\n================ TABBY REQUEST ================")
-            print("URL:")
-            print(url)
-
-            print("\nSECRET KEY:")
-            print(repr(settings.TABBY_SECRET_KEY))
-
-            print("\nHEADERS:")
-            print(headers)
-
-            print("\nPAYLOAD:")
-            print(payload)
+            # DEBUG
+            print("\n=========== TABBY DEBUG ===========")
+            print("TABBY_SECRET_KEY:", repr(settings.TABBY_SECRET_KEY))
+            print("CURRENCY:", currency)
+            print("TOTAL AMOUNT:", total_amount)
+            print("PAYLOAD:", payload)
+            print("===================================\n")
 
             response = requests.post(
                 url,
@@ -1696,30 +1725,17 @@ class CreateTabbyPayment(APIView):
                 timeout=30
             )
 
-            print("\n================ TABBY RESPONSE ================")
-
-            print("STATUS CODE:")
-            print(response.status_code)
-
-            print("\nRESPONSE HEADERS:")
-            print(dict(response.headers))
-
-            print("\nRESPONSE BODY:")
-            print(repr(response.text))
-
-            print("\n================================================")
+            print("TABBY STATUS:", response.status_code)
+            print("TABBY RESPONSE:", response.text)
 
             try:
                 data = response.json()
-            except Exception as json_error:
-                print("JSON PARSE ERROR:", str(json_error))
-
+            except Exception:
                 return Response(
                     {
                         "error": "Tabby returned non-JSON response",
                         "status_code": response.status_code,
-                        "response": response.text,
-                        "headers": dict(response.headers)
+                        "response": response.text
                     },
                     status=500
                 )
@@ -1736,9 +1752,9 @@ class CreateTabbyPayment(APIView):
             return Response({
                 "payment_id": data.get("id"),
                 "payment_url": data.get("configuration", {})
-                                  .get("available_products", {})
-                                  .get("installments", {})
-                                  .get("web_url"),
+                                   .get("available_products", {})
+                                   .get("installments", {})
+                                   .get("web_url"),
                 "full_response": data
             })
 
@@ -1756,5 +1772,3 @@ class CreateTabbyPayment(APIView):
                 {"error": str(e)},
                 status=500
             )
-        
-

@@ -1052,77 +1052,6 @@ def view_orders(request):
 from django.utils import timezone
 import json
 
-# @csrf_exempt
-# @require_http_methods(["POST"])
-# def update_order_status(request, order_id):
-
-#     try:
-#         data = json.loads(request.body)
-
-#         order = Order.objects.prefetch_related(
-#             "items__product"
-#         ).get(id=order_id)
-
-#         status = data.get("status")
-
-#         if status:
-#             order.status = status
-
-#         # =========================
-#         # CREATE SHIPMENT
-#         # =========================
-
-#         if status == "shipped":
-
-#             shipment = create_unified_shipment(order)
-
-#             order.tracking_link = shipment.get("tracking_url")
-
-#             order.tracking_number = shipment.get("tracking_number")
-
-#             order.shipment_id = shipment.get("shipment_id")
-
-#             order.carrier = shipment.get("carrier")
-
-#             order.shipped_at = timezone.now()
-
-#         order.save()
-
-#         return JsonResponse({
-#             "message": "Order updated successfully",
-
-#             "id": order.id,
-
-#             "status": order.status,
-
-#             "tracking_link": order.tracking_link,
-
-#             "tracking_number": order.tracking_number,
-
-#             "shipment_id": order.shipment_id,
-
-#             "carrier": order.carrier
-#         })
-
-#     except Order.DoesNotExist:
-
-#         return JsonResponse({
-#             "error": "Order not found"
-#         }, status=404)
-
-#     except json.JSONDecodeError:
-
-#         return JsonResponse({
-#             "error": "Invalid JSON format"
-#         }, status=400)
-
-#     except Exception as e:
-
-#         return JsonResponse({
-#             "error": str(e)
-#         }, status=500)
-
-
 @require_http_methods(["POST"])
 @csrf_exempt
 def update_order_status(request, order_id):
@@ -2186,7 +2115,7 @@ def delete_supplier(request, id):
 
 
 @api_view(["GET"])
-@permission_classes([IsAdminUser])
+# @permission_classes([IsAdminUser])
 def get_notifications(request):
 
     notifications = Notification.objects.all()
