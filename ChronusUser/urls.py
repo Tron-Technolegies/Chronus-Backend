@@ -37,6 +37,13 @@ urlpatterns = [
 
 
     path("track-order/<int:order_id>/", views.track_order, name='track_order'),
-    path("payments/tabby/",views.CreateTabbyPayment.as_view(),name="tabby-payment"
-),
+    path("payments/tabby/",views.CreateTabbyPayment.as_view(),name="tabby-payment"),
+    path("forgot-password/",views.forgot_password, name='forgot_password'),
+    path("reset-password/",views.reset_password, name='reset_password'),
+
+    path("addresses/", views.view_addresses, name="view_addresses"),
+    path("addresses/add/", views.add_address, name="add_address"),
+    path("addresses/<int:address_id>/update/", views.update_address, name="update_address"),
+    path("addresses/<int:address_id>/delete/", views.delete_address, name="delete_address"),
+
 ]

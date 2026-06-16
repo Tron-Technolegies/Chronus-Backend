@@ -15,6 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db.models import Avg, Count
 from ChronasAdmin.models import ProductColor
 from ChronasAdmin.models import FineArtSize, Frame, Material
+from .models import Address
 # ===============================
 # GUEST SESSION
 # ===============================
@@ -248,61 +249,6 @@ def add_review(request):
 # @api_view(["POST"])
 # @permission_classes([AllowAny])
 # def checkout(request):
-#     cart = get_cart(request)
-
-#     items = CartItem.objects.select_related("product").filter(cart=cart)
-
-#     if not items.exists():
-#         return Response({"error": "Cart is empty"}, status=400)
-
-#     total = 0
-#     for i in items:
-#         # total += i.quantity * i.product.price
-#         total += i.quantity * i.price
-
-#     guest_id = None
-#     if not request.user.is_authenticated:
-#         guest_id = request.headers.get("X-Guest-Id")
-#         if not guest_id:
-#             return Response({"error": "guest_id required"}, status=400)
-
-#     city = request.data.get("city", "")
-#     postal_code = request.data.get("postal_code", "")
-#     country = request.data.get("country", "")
-#     first_name = request.data.get("first_name", "")
-#     last_name = request.data.get("last_name", "")
-
-#     shipping_address = f"{first_name} {last_name}, {city}, {postal_code}, {country}".strip(", ").strip()
-
-#     if not shipping_address:
-#         return Response({"error": "shipping address required"}, status=400)
-
-#     order = Order.objects.create(
-#         user=request.user if request.user.is_authenticated else None,
-#         guest_id=guest_id,
-#         email=request.data.get("email"),
-#         phone=request.data.get("phone"),
-#         shipping_address=shipping_address,
-#         total_amount=total,
-#     )
-
-#     order_items = [
-#         OrderItem(
-#             order=order,
-#             product=i.product,
-#             quantity=i.quantity,
-#             # price=i.product.price
-#             price=i.price
-#         )
-#         for i in items
-#     ]
-#     OrderItem.objects.bulk_create(order_items)
-
-  
-#     return Response({"order_id": order.id, "amount": total})
-@api_view(["POST"])
-@permission_classes([AllowAny])
-def checkout(request):
     currency = request.data.get(
             "currency",
             "USD"
@@ -365,6 +311,176 @@ def checkout(request):
     OrderItem.objects.bulk_create(order_items)
 
     return Response({"order_id": order.id, "amount": total,  "currency": currency})
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def checkout(request):
+
+    currency = request.data.get(
+        "currency",
+        "USD"
+    ).upper()
+
+    cart = get_cart(request)
+
+    items = CartItem.objects.select_related(
+        "product",
+        "size",
+        "frame",
+        "material"
+    ).filter(
+        cart=cart
+    )
+
+    if not items.exists():
+        return Response(
+            {"error": "Cart is empty"},
+            status=400
+        )
+
+    total = 0
+
+    for item in items:
+        total += item.quantity * item.price
+
+    guest_id = None
+
+    if not request.user.is_authenticated:
+
+        guest_id = request.headers.get(
+            "X-Guest-Id"
+        )
+
+        if not guest_id:
+            return Response(
+                {"error": "guest_id required"},
+                status=400
+            )
+
+    address_id = request.data.get(
+        "address_id"
+    )
+
+    # Logged-in user using saved address
+    if request.user.is_authenticated and address_id:
+
+        address = Address.objects.filter(
+            id=address_id,
+            user=request.user
+        ).first()
+
+        if not address:
+            return Response(
+                {"error": "Address not found"},
+                status=404
+            )
+
+        shipping_address = (
+            f"{address.full_name}, "
+            f"{address.address_line_1}, "
+            f"{address.city}, "
+            f"{address.state}, "
+            f"{address.country}, "
+            f"{address.postal_code}"
+        )
+
+        phone = address.phone
+
+    # Guest checkout OR logged-in user manual address
+    else:
+
+        city = request.data.get(
+            "city",
+            ""
+        )
+
+        postal_code = request.data.get(
+            "postal_code",
+            ""
+        )
+
+        country = request.data.get(
+            "country",
+            ""
+        )
+
+        first_name = request.data.get(
+            "first_name",
+            ""
+        )
+
+        last_name = request.data.get(
+            "last_name",
+            ""
+        )
+
+        phone = request.data.get(
+            "phone",
+            ""
+        )
+
+        shipping_address = (
+            f"{first_name} {last_name}, "
+            f"{city}, "
+            f"{postal_code}, "
+            f"{country}"
+        ).strip(", ").strip()
+
+        if not shipping_address:
+            return Response(
+                {"error": "shipping address required"},
+                status=400
+            )
+
+    order = Order.objects.create(
+        user=(
+            request.user
+            if request.user.is_authenticated
+            else None
+        ),
+        guest_id=guest_id,
+        email=request.data.get("email"),
+        phone=phone,
+        shipping_address=shipping_address,
+        total_amount=total,
+        currency=currency
+    )
+
+    Notification.objects.create(
+        title="New Order Received",
+        message=(
+            f"Order #{order.id} "
+            f"has been placed for "
+            f"{order.total_amount}"
+        )
+    )
+
+    order_items = [
+
+        OrderItem(
+            order=order,
+            product=item.product,
+            size=item.size,
+            frame=item.frame,
+            material=item.material,
+            quantity=item.quantity,
+            price=item.price
+        )
+
+        for item in items
+    ]
+
+    OrderItem.objects.bulk_create(
+        order_items
+    )
+
+    return Response({
+        "order_id": order.id,
+        "amount": total,
+        "currency": currency
+    })
+
+
 # ===============================
 # USER ORDERS (AUTH)
 # ===============================
@@ -1625,3 +1741,225 @@ class CreateTabbyPayment(APIView):
                 {"error": str(e)},
                 status=500
             )
+        
+
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes
+from django.core.mail import send_mail
+from django.contrib.auth.models import User
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def forgot_password(request):
+    email = request.data.get("email")
+
+    if not email:
+        return Response(
+            {"error": "Email is required"},
+            status=400
+        )
+
+    user = User.objects.filter(email=email).first()
+
+    if not user:
+        return Response(
+            {"message": "If the email exists, a reset link has been sent"}
+        )
+
+    uid = urlsafe_base64_encode(
+        force_bytes(user.pk)
+    )
+
+    token = default_token_generator.make_token(
+        user
+    )
+
+    reset_link = (
+        f"https://chronosgallery.com/reset-password/"
+        f"{uid}/{token}/"
+    )
+
+    send_mail(
+        subject="Reset Your Password",
+        message=f"""
+Click the link below to reset your password:
+
+{reset_link}
+
+If you did not request this, ignore this email.
+""",
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[user.email],
+        fail_silently=False,
+    )
+
+    return Response({
+        "message": "Password reset link sent"
+    })
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def reset_password(request):
+    uid = request.data.get("uid")
+    token = request.data.get("token")
+    password = request.data.get("password")
+
+    if not uid or not token or not password:
+        return Response(
+            {"error": "uid, token and password required"},
+            status=400
+        )
+
+    try:
+        user_id = urlsafe_base64_decode(
+            uid
+        ).decode()
+
+        user = User.objects.get(
+            pk=user_id
+        )
+
+    except Exception:
+        return Response(
+            {"error": "Invalid reset link"},
+            status=400
+        )
+
+    if not default_token_generator.check_token(
+        user,
+        token
+    ):
+        return Response(
+            {"error": "Invalid or expired token"},
+            status=400
+        )
+
+    user.set_password(password)
+    user.save()
+
+    return Response({
+        "message": "Password updated successfully"
+    })
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def add_address(request):
+
+    if request.data.get("is_default"):
+
+        Address.objects.filter(
+            user=request.user
+        ).update(
+            is_default=False
+        )
+
+    address = Address.objects.create(
+        user=request.user,
+        full_name=request.data.get("full_name"),
+        phone=request.data.get("phone"),
+        address_line_1=request.data.get("address_line_1"),
+        address_line_2=request.data.get("address_line_2"),
+        city=request.data.get("city"),
+        state=request.data.get("state"),
+        country=request.data.get("country"),
+        postal_code=request.data.get("postal_code"),
+        is_default=request.data.get(
+            "is_default",
+            False
+        )
+    )
+
+    return Response({
+        "message": "Address added",
+        "id": address.id
+    })
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def view_addresses(request):
+
+    addresses = Address.objects.filter(
+        user=request.user
+    )
+
+    data = []
+
+    for address in addresses:
+        data.append({
+            "id": address.id,
+            "full_name": address.full_name,
+            "phone": address.phone,
+            "address_line_1": address.address_line_1,
+            "address_line_2": address.address_line_2,
+            "city": address.city,
+            "state": address.state,
+            "country": address.country,
+            "postal_code": address.postal_code,
+            "is_default": address.is_default
+        })
+
+    return Response(data)
+
+@api_view(["PUT"])
+@permission_classes([IsAuthenticated])
+def update_address(request, address_id):
+
+    address = Address.objects.get(
+        id=address_id,
+        user=request.user
+    )
+
+    if request.data.get("is_default"):
+
+        Address.objects.filter(
+            user=request.user
+        ).exclude(
+            id=address.id
+        ).update(
+            is_default=False
+        )
+
+    for field in [
+        "full_name",
+        "phone",
+        "address_line_1",
+        "address_line_2",
+        "city",
+        "state",
+        "country",
+        "postal_code"
+    ]:
+        if field in request.data:
+            setattr(
+                address,
+                field,
+                request.data[field]
+            )
+
+    if "is_default" in request.data:
+        address.is_default = request.data["is_default"]
+
+    address.save()
+
+    return Response({
+        "message": "Address updated"
+    })
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_address(request, address_id):
+
+    address = Address.objects.get(
+        id=address_id,
+        user=request.user
+    )
+
+    address.delete()
+
+    return Response({
+        "message": "Address deleted"
+    })
