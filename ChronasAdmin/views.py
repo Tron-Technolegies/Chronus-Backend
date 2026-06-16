@@ -299,6 +299,8 @@ def add_products(request):
         specification = request.POST.get("specification")
         frame_ids = request.POST.get("frame_ids")
         material_ids = request.POST.get("material_ids")
+        supplier_cost = request.POST.get("supplier_cost")
+        is_published = request.POST.get("is_published","true") in ["true", "True", "1"]
         # material_ids = request.data.get("material_ids", [])
         supplier = None
 
@@ -374,7 +376,9 @@ def add_products(request):
             image=image,
             is_featured=is_featured,
             is_best_seller=is_best_seller,
-            specification=specification
+            specification=specification,
+            is_published=is_published,
+            supplier_cost=supplier_cost,
         )
         if frame_ids:
             product.frames.set(frame_ids)
@@ -493,6 +497,17 @@ def view_products(request):
     min_price = request.GET.get("min_price")
     max_price = request.GET.get("max_price")
 
+    low_stock = request.GET.get("low_stock")
+    try:
+        stock_threshold = int(
+            request.GET.get("stock_threshold", 10)
+        )
+    except ValueError:
+        return JsonResponse(
+            {"error": "Invalid stock_threshold"},
+            status=400
+    )
+
     try:
         page = int(request.GET.get("page", 1))
         limit = int(request.GET.get("limit", 12))
@@ -533,6 +548,30 @@ def view_products(request):
             Q(brand__name__icontains=search) |
             Q(category__name__icontains=search) |
             Q(subcategory__name__icontains=search)
+        )
+
+    # LOW STOCK FILTER    
+    if low_stock and low_stock.lower() == "true":
+        products = products.filter(
+            stock__lte=stock_threshold
+        )
+
+    is_featured = request.GET.get("is_featured")
+    if is_featured:
+        products = products.filter(
+            is_featured=is_featured.lower() == "true"
+        )
+
+    is_best_seller = request.GET.get("is_best_seller")
+    if is_best_seller:
+        products = products.filter(
+            is_best_seller=is_best_seller.lower() == "true"
+        )
+
+    is_published = request.GET.get("is_published")
+    if is_published:
+        products = products.filter(
+            is_published=is_published.lower() == "true"
         )
 
     # PRICE FILTER
@@ -628,7 +667,9 @@ def view_products(request):
                     "extra_price": str(m.extra_price) if hasattr(m, "extra_price") else None
                 }
                 for m in product.materials.all()
-            ]
+            ],
+            "is_low_stock": product.stock <= stock_threshold,
+            "is_published": product.is_published,
         })
 
     return JsonResponse({
@@ -636,167 +677,9 @@ def view_products(request):
         "limit": limit,
         "total_products": total_products,
         "total_pages": (total_products + limit - 1) // limit,
-        "products": data
+        "products": data,
     }, status=200)
-# @csrf_exempt
-# @require_http_methods(["POST"])
-# def update_product(request, product_id):
-#     try:
-#         product = Product.objects.get(id=product_id)
 
-#         name = request.POST.get("name")
-#         category_id = request.POST.get("category")
-#         brand_id = request.POST.get("brand")
-#         price = request.POST.get("price")
-#         description = request.POST.get("description")
-#         stock = request.POST.get("stock")
-#         image = request.FILES.get("image")
-#         specification = request.POST.get("specification")
-#         frame_ids = request.data.get("frame_ids")
-#         material_ids = request.data.get("material_ids")
-
-#         if frame_ids is not None:
-#             product.frames.set(frame_ids)
-
-#         if material_ids is not None:
-#             product.materials.set(material_ids)
-#         # NAME
-#         if name:
-#             product.name = name
-
-#         # CATEGORY
-#         if category_id:
-#             category = Category.objects.filter(id=category_id).first()
-#             if not category:
-#                 return JsonResponse({"error": "Invalid category"}, status=400)
-#             product.category = category
-
-#         # SUBCATEGORY
-#         subcategory_id = request.POST.get("subcategory")
-
-#         if subcategory_id is not None:
-#             if subcategory_id == "":
-#                 product.subcategory = None
-#             else:
-#                 subcategory = SubCategory.objects.filter(id=subcategory_id).first()
-#                 product.subcategory = subcategory
-
-#         # BRAND
-#         if brand_id:
-#             brand = Brand.objects.filter(id=brand_id).first()
-#             if not brand:
-#                 return JsonResponse({"error": "Invalid brand"}, status=400)
-#             product.brand = brand
-
-#         # PRICE
-#         if price is not None:
-#             product.price = price
-
-#         # DESCRIPTION
-#         if description:
-#             product.description = description
-
-#         # STOCK
-#         if stock is not None:
-#             product.stock = stock
-
-#         # MAIN IMAGE
-#         if image:
-#             if product.image:
-#                 cloudinary.uploader.destroy(product.image.public_id)
-
-#             product.image = image
-
-#         # SPECIFICATION
-#         if specification:
-#             try:
-#                 specification = json.loads(specification)
-#                 product.specification = specification
-#             except json.JSONDecodeError:
-#                 return JsonResponse({"error": "Invalid specification format"}, status=400)
-
-#         # ------------------------
-#         # UPDATE SIZES
-#         # ------------------------
-#         sizes = request.POST.get("sizes")
-
-#         if sizes:
-#             try:
-#                 sizes = json.loads(sizes)
-
-#                 product.sizes.all().delete()
-
-#                 for item in sizes:
-#                     FineArtSize.objects.create(
-#                         product=product,
-#                         size=item.get("size"),
-#                         price=item.get("price")
-#                     )
-
-#             except json.JSONDecodeError:
-#                 return JsonResponse({"error": "Invalid sizes format"}, status=400)
-
-#         # ------------------------
-#         # UPDATE COLORS
-#         # ------------------------
-#         colors = request.POST.get("colors")
-
-#         if colors:
-#             try:
-#                 colors = json.loads(colors)
-
-#                 product.colors.all().delete()
-
-#                 for index, color in enumerate(colors):
-
-#                     color_image = request.FILES.get(f"color_image_{index}")
-
-#                     ProductColor.objects.create(
-#                         product=product,
-#                         color_name=color.get("color_name"),
-#                         image=color_image
-#                     )
-
-#             except json.JSONDecodeError:
-#                 return JsonResponse({"error": "Invalid colors format"}, status=400)
-
-#         product.save()
-
-#         # ------------------------
-#         # UPDATE GALLERY
-#         # ------------------------
-#         gallery_images = request.FILES.getlist("images")
-
-#         if gallery_images:
-
-#             # delete old gallery images from cloudinary
-#             for img in product.gallery.all():
-#                 cloudinary.uploader.destroy(img.image.public_id)
-
-#             product.gallery.all().delete()
-
-#             # add new images
-#             for img in gallery_images:
-#                 ProductImage.objects.create(
-#                     product=product,
-#                     image=img
-#                 )
-
-#         return JsonResponse({
-#             "message": "Product updated successfully",
-#             "id": product.id,
-#             "specification": product.specification
-#         })
-
-#     except Product.DoesNotExist:
-#         return JsonResponse({"error": "Product not found"}, status=404)
-
-#     except Exception as e:
-#         return JsonResponse({
-#             "error": "Something went wrong",
-#             "details": str(e)
-#         }, status=500)
-    
 @csrf_exempt
 @require_http_methods(["POST"])
 def update_product(request, product_id):
@@ -931,7 +814,27 @@ def update_product(request, product_id):
 
             except json.JSONDecodeError:
                 return JsonResponse({"error": "Invalid colors format"}, status=400)
+            
+        is_featured = request.POST.get("is_featured")
+        if is_featured is not None:
+            product.is_featured = str(is_featured).lower() == "true"
 
+        # BEST SELLER
+        is_best_seller = request.POST.get("is_best_seller")
+        if is_best_seller is not None:
+            product.is_best_seller = str(is_best_seller).lower() == "true"
+        supplier_cost = request.POST.get("supplier_cost")
+
+        if supplier_cost is not None:
+            product.supplier_cost = supplier_cost
+
+
+        is_published = request.POST.get("is_published")
+
+        if is_published is not None:
+            product.is_published = (
+                str(is_published).lower() == "true"
+            )
         product.save()
 
         # UPDATE GALLERY
@@ -2115,7 +2018,6 @@ def delete_supplier(request, id):
 
 
 @api_view(["GET"])
-# @permission_classes([IsAdminUser])
 def get_notifications(request):
 
     notifications = Notification.objects.all()

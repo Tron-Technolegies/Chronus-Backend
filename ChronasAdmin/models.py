@@ -80,6 +80,9 @@ class Product(models.Model):
     frames = models.ManyToManyField(Frame, blank=True, related_name="products")
     materials = models.ManyToManyField(Material, blank=True, related_name="products")
     supplier = models.ForeignKey(Supplier,on_delete=models.SET_NULL,null=True,blank=True,related_name="products")
+    supplier_cost = models.DecimalField(max_digits=10,decimal_places=2,null=True,blank=True)
+    is_published = models.BooleanField(default=True)
+  
 
     def __str__(self):
         return self.name
