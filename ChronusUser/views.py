@@ -166,25 +166,15 @@ def view_cart(request):
 
 @api_view(["DELETE"])
 @permission_classes([AllowAny])
-def remove_from_cart(request, item_id):
+def remove_from_cart(request, product_id):
     cart = get_cart(request)
 
     try:
-        item = CartItem.objects.get(id=item_id, cart=cart)
+        item = CartItem.objects.get(id=product_id, cart=cart)
         item.delete()
         return Response({"message": "Item removed"})
     except CartItem.DoesNotExist:
         return Response({"error": "Item not found"}, status=404)
-# def remove_from_cart(request, product_id):
-#     cart = get_cart(request)
-
-#     try:
-#         item = CartItem.objects.get(cart=cart, product_id=product_id)
-#         item.delete()
-#         return Response({"message": "Item removed"})
-#     except CartItem.DoesNotExist:
-#         return Response({"error": "Item not found in cart"}, status=404)
-    
 
 # ===============================
 # WISHLIST
@@ -500,7 +490,10 @@ def my_orders(request):
             items.append({
                 "product_name": item.product.name,
                 "quantity": item.quantity,
-                # "price": str(item.price),
+                "product_image": (
+                    item.product.image.url
+                    if item.product.image else None
+                ),
                 "price": convert_price(
                     item.price,
                     order.currency
@@ -511,17 +504,26 @@ def my_orders(request):
         data.append({
             "id": order.id,
             "status": order.status,
-            # "total_amount": str(order.total_amount),
+           
             "total_amount": convert_price(
                 order.total_amount,
                 order.currency
             ),
             "currency": order.currency,
             "created_at": order.created_at,
+
+            "tracking_link": order.tracking_link,
+            "tracking_number": order.tracking_number,
+            "carrier": order.carrier,
+            "shipment_id": order.shipment_id,
+            "shipped_at": order.shipped_at,
+
             "items": items
         })
 
     return Response({"orders": data})
+
+
 
 
 from .currency import convert_amount
