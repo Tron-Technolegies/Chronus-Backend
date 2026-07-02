@@ -82,7 +82,12 @@ class Product(models.Model):
     supplier = models.ForeignKey(Supplier,on_delete=models.SET_NULL,null=True,blank=True,related_name="products")
     supplier_cost = models.DecimalField(max_digits=10,decimal_places=2,null=True,blank=True)
     is_published = models.BooleanField(default=True)
-  
+    
+    
+    weight = models.DecimalField(max_digits=8,decimal_places=2,default=0.50,help_text="Weight in kilograms")
+    length = models.DecimalField(max_digits=8,decimal_places=2,default=10.00,help_text="Length in centimeters")
+    width = models.DecimalField(max_digits=8,decimal_places=2,default=10.00,help_text="Width in centimeters")
+    height = models.DecimalField(max_digits=8,decimal_places=2,default=10.00,help_text="Height in centimeters")
 
     def __str__(self):
         return self.name
@@ -151,6 +156,19 @@ class Order(models.Model):
     tracking_number = models.CharField(max_length=255, blank=True, null=True)
     shipment_id = models.CharField(max_length=255, blank=True, null=True)
     carrier = models.CharField(max_length=255, blank=True, null=True)
+
+
+
+    receiver_name = models.CharField(max_length=200, blank=True)
+    address_line_1 = models.CharField(max_length=255, blank=True)
+    address_line_2 = models.CharField(max_length=255, blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    state = models.CharField(max_length=100, blank=True)
+    country = models.CharField(max_length=100, blank=True)
+    postal_code = models.CharField(max_length=20, blank=True)
+
+    label_url = models.URLField(null=True, blank=True)
+
 
     def __str__(self):
         return f"Order #{self.id}"

@@ -304,6 +304,11 @@ def add_products(request):
         # material_ids = request.data.get("material_ids", [])
         supplier = None
 
+        weight = request.POST.get("weight", 0.50)
+        length = request.POST.get("length", 10.00)
+        width = request.POST.get("width", 10.00)
+        height = request.POST.get("height", 10.00)
+
         if supplier_id:
             supplier = Supplier.objects.filter(id=supplier_id).first()
 
@@ -379,6 +384,11 @@ def add_products(request):
             specification=specification,
             is_published=is_published,
             supplier_cost=supplier_cost,
+
+            weight=weight,
+            length=length,
+            width=width,
+            height=height,
         )
         if frame_ids:
             product.frames.set(frame_ids)
@@ -470,6 +480,11 @@ def add_products(request):
             "specification": product.specification,
             "colors": color_data,
             "created_at": product.created_at,
+
+            "weight": str(product.weight),
+            "length": str(product.length),
+            "width": str(product.width),
+            "height": str(product.height),
         }, status=201)
 
     except Exception as e:
@@ -630,6 +645,12 @@ def view_products(request):
 
             "specification": product.specification,
 
+
+            "weight": str(product.weight),
+            "length": str(product.length),
+            "width": str(product.width),
+            "height": str(product.height),
+
             "sizes": [
                 {
                     "size": s.size,
@@ -696,6 +717,12 @@ def update_product(request, product_id):
         specification = request.POST.get("specification")
         frame_ids = request.POST.get("frame_ids")
         material_ids = request.POST.get("material_ids")
+
+
+        weight = request.POST.get("weight")
+        length = request.POST.get("length")
+        width = request.POST.get("width")
+        height = request.POST.get("height")
 
         # FRAMES
         if frame_ids is not None:
@@ -835,6 +862,22 @@ def update_product(request, product_id):
             product.is_published = (
                 str(is_published).lower() == "true"
             )
+
+        
+
+        if weight is not None:
+            product.weight = weight
+
+        if length is not None:
+            product.length = length
+
+        if width is not None:
+            product.width = width
+
+        if height is not None:
+            product.height = height
+
+            
         product.save()
 
         # UPDATE GALLERY
@@ -2035,27 +2078,29 @@ def get_notifications(request):
 
     return Response(data)
 
-
-
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.http import JsonResponse
-import json
 
+from .services.dhl import DHLService
 from .utils import send_shipment_email
+
+
 @require_http_methods(["POST"])
 @csrf_exempt
 def create_shipment(request, order_id):
 
     try:
 
-        order = Order.objects.get(id=order_id)
+        order = Order.objects.prefetch_related(
+            "items__product"
+        ).get(id=order_id)
 
         if order.payment_status != "paid":
             return JsonResponse(
                 {
-                    "error": "Cannot create shipment before payment"
+                    "error": "Cannot create shipment before payment."
                 },
                 status=400
             )
@@ -2063,18 +2108,41 @@ def create_shipment(request, order_id):
         if order.status != "processing":
             return JsonResponse(
                 {
-                    "error": "Order must be in processing state"
+                    "error": "Order must be in processing state."
                 },
                 status=400
             )
 
-        # TEMPORARY MOCK DATA
-        # Replace later with DHL API response
+        if order.shipment_id:
+            return JsonResponse(
+                {
+                    "error": "Shipment already created."
+                },
+                status=400
+            )
 
-        tracking_number = f"DHL-{order.id}"
-        tracking_link = f"https://www.dhl.com/in-en/home/tracking.html?tracking-id={tracking_number}"
+        dhl = DHLService()
+
+        response = dhl.create_shipment(order)
+
+        tracking_number = (
+            response.get("shipmentTrackingNumber")
+            or response.get("trackingNumber")
+            or ""
+        )
+
+        shipment_id = (
+            response.get("shipmentId")
+            or tracking_number
+        )
+
+        tracking_link = response.get(
+            "trackingUrl",
+            ""
+        )
 
         order.carrier = "DHL"
+        order.shipment_id = shipment_id
         order.tracking_number = tracking_number
         order.tracking_link = tracking_link
         order.shipped_at = timezone.now()
@@ -2090,23 +2158,218 @@ def create_shipment(request, order_id):
         send_shipment_email(order)
 
         return JsonResponse({
-            "message": "Shipment created successfully",
+
+            "message": "Shipment created successfully.",
+
             "order_id": order.id,
+
             "status": order.status,
+
             "carrier": order.carrier,
+
             "tracking_number": order.tracking_number,
-            "tracking_link": order.tracking_link
+
+            "tracking_link": order.tracking_link,
+
+            "shipment_id": order.shipment_id
+
         })
 
     except Order.DoesNotExist:
+
         return JsonResponse(
-            {"error": "Order not found"},
+            {
+                "error": "Order not found."
+            },
             status=404
         )
 
     except Exception as e:
+
         return JsonResponse(
-            {"error": str(e)},
+            {
+                "error": str(e)
+            },
             status=500
         )
+
+# from django.utils import timezone
+# from django.views.decorators.csrf import csrf_exempt
+# from django.views.decorators.http import require_http_methods
+# from django.http import JsonResponse
+# import json
+
+# from django.utils import timezone
+# from .services.dhl import DHLService
+# from .utils import send_shipment_email
+
+
+# @require_http_methods(["POST"])
+# @csrf_exempt
+# def create_shipment(request, order_id):
+
+#     try:
+
+#         order = Order.objects.prefetch_related(
+#             "items__product"
+#         ).get(id=order_id)
+
+#         if order.payment_status != "paid":
+#             return JsonResponse(
+#                 {
+#                     "error": "Cannot create shipment before payment."
+#                 },
+#                 status=400
+#             )
+
+#         if order.status != "processing":
+#             return JsonResponse(
+#                 {
+#                     "error": "Order must be in processing state."
+#                 },
+#                 status=400
+#             )
+
+#         if order.shipment_id:
+#             return JsonResponse(
+#                 {
+#                     "error": "Shipment already created."
+#                 },
+#                 status=400
+#             )
+
+#         dhl = DHLService()
+#         # products = dhl.get_available_products(order)
+
+#         # print(products)
+
+#         # return JsonResponse(products, safe=False)
+
+#         response = dhl.create_shipment(order)
+#         print("=" * 80)
+#         print("FULL DHL RESPONSE")
+#         print(response)
+
+#         print("=" * 80)
+#         print("Tracking Number")
+#         print(response.get("shipmentTrackingNumber"))
+
+#         print("=" * 80)
+#         print("Shipment ID")
+#         print(response.get("shipmentId"))
+
+#         print("=" * 80)
+#         print("Documents")
+#         print(response.get("documents"))
+
+#         # Uncomment this while testing
+#         print(response)
+
+#         tracking_number = (
+#             response.get("shipmentTrackingNumber")
+#             or response.get("trackingNumber")
+#             or ""
+#         )
+
+#         shipment_id = (
+#             response.get("shipmentTrackingNumber")
+#             or response.get("shipmentId")
+#             or tracking_number
+#         )
+#         tracking_link = response.get("trackingUrl", "")
+
+#         # tracking_link = ""
+
+#         # if tracking_number:
+#         #     tracking_link = (
+#         #         "https://www.dhl.com/global-en/home/"
+#         #         "tracking/tracking-express.html"
+#         #         f"?submit=1&tracking-id={tracking_number}"
+#         #     )
+
+#         label_url = ""
+
+#         document_images = response.get(
+#             "documents",
+#             []
+#         )
+
+#         # if document_images:
+
+#         #     first_document = document_images[0]
+
+#         #     label_url = (
+#         #         first_document.get("url")
+#         #         or first_document.get("content")
+#         #         or ""
+#         #     )
+
+#         order.carrier = "DHL"
+
+#         order.shipment_id = shipment_id
+
+#         order.tracking_number = tracking_number
+
+#         order.tracking_link = tracking_link
+
+#         # order.label_url = label_url
+
+#         order.shipped_at = timezone.now()
+
+#         order.status = "shipped"
+#         print("tracking_number:", order.tracking_number)
+#         print("tracking_link:", order.tracking_link)
+#         print("shipment_id:", order.shipment_id)
+#         print("label_url:", order.label_url)
+
+#         order.save()
+
+#         Notification.objects.create(
+#             title="Shipment Created",
+#             message=f"Order #{order.id} shipped via DHL"
+#         )
+
+#         send_shipment_email(order)
+
+#         return JsonResponse({
+
+#             "message": "Shipment created successfully.",
+
+#             "order_id": order.id,
+
+#             "status": order.status,
+
+#             "carrier": order.carrier,
+
+#             "tracking_number": order.tracking_number,
+
+#             "tracking_link": order.tracking_link,
+
+#             "shipment_id": order.shipment_id,
+
+#             # "label_url": order.label_url,
+
+#             "dhl_response": response
+
+#         })
+
+#     except Order.DoesNotExist:
+
+#         return JsonResponse(
+#             {
+#                 "error": "Order not found."
+#             },
+#             status=404
+#         )
+
+#     except Exception as e:
+
+#         return JsonResponse(
+#             {
+#                 "error": str(e)
+#             },
+#             status=500
+#         )
     
+
+

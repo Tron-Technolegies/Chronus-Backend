@@ -236,72 +236,6 @@ def add_review(request):
     return Response({"message": "Review added"})
 
 
-# @api_view(["POST"])
-# @permission_classes([AllowAny])
-# def checkout(request):
-    currency = request.data.get(
-            "currency",
-            "USD"
-        ).upper()
-    cart = get_cart(request)
-
-    items = CartItem.objects.select_related(
-        "product", "size", "frame", "material"
-    ).filter(cart=cart)
-
-    if not items.exists():
-        return Response({"error": "Cart is empty"}, status=400)
-
-    total = 0
-    for i in items:
-        total += i.quantity * i.price
-
-    guest_id = None
-    if not request.user.is_authenticated:
-        guest_id = request.headers.get("X-Guest-Id")
-        if not guest_id:
-            return Response({"error": "guest_id required"}, status=400)
-
-    city = request.data.get("city", "")
-    postal_code = request.data.get("postal_code", "")
-    country = request.data.get("country", "")
-    first_name = request.data.get("first_name", "")
-    last_name = request.data.get("last_name", "")
-
-    shipping_address = f"{first_name} {last_name}, {city}, {postal_code}, {country}".strip(", ").strip()
-
-    if not shipping_address:
-        return Response({"error": "shipping address required"}, status=400)
-
-    order = Order.objects.create(
-        user=request.user if request.user.is_authenticated else None,
-        guest_id=guest_id,
-        email=request.data.get("email"),
-        phone=request.data.get("phone"),
-        shipping_address=shipping_address,
-        total_amount=total,
-        currency=currency
-    )
-    Notification.objects.create(
-        title="New Order Received",
-        message=f"Order #{order.id} has been placed for {order.total_amount}"
-    )
-    order_items = [
-        OrderItem(
-            order=order,
-            product=i.product,
-            size=i.size,
-            frame=i.frame,
-            material=i.material,
-            quantity=i.quantity,
-            price=i.price
-        )
-        for i in items
-    ]
-    OrderItem.objects.bulk_create(order_items)
-
-    return Response({"order_id": order.id, "amount": total,  "currency": currency})
-
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def checkout(request):
@@ -365,13 +299,33 @@ def checkout(request):
                 status=404
             )
 
+        # shipping_address = (
+        #     f"{address.full_name}, "
+        #     f"{address.address_line_1}, "
+        #     f"{address.city}, "
+        #     f"{address.state}, "
+        #     f"{address.country}, "
+        #     f"{address.postal_code}"
+        # )
+        receiver_name = address.full_name
+
+
+        address_line_1 = address.address_line_1
+        address_line_2 = address.address_line_2
+
+        city = address.city
+        state = address.state
+        country = address.country
+        postal_code = address.postal_code
+
         shipping_address = (
-            f"{address.full_name}, "
-            f"{address.address_line_1}, "
-            f"{address.city}, "
-            f"{address.state}, "
-            f"{address.country}, "
-            f"{address.postal_code}"
+            f"{receiver_name}, "
+            f"{address_line_1}, "
+            f"{address_line_2}, "
+            f"{city}, "
+            f"{state}, "
+            f"{country}, "
+            f"{postal_code}"
         )
 
         phone = address.phone
@@ -379,60 +333,126 @@ def checkout(request):
     # Guest checkout OR logged-in user manual address
     else:
 
-        city = request.data.get(
-            "city",
+        # city = request.data.get(
+        #     "city",
+        #     ""
+        # )
+
+        # postal_code = request.data.get(
+        #     "postal_code",
+        #     ""
+        # )
+
+        # country = request.data.get(
+        #     "country",
+        #     ""
+        # )
+
+        # first_name = request.data.get(
+        #     "first_name",
+        #     ""
+        # )
+
+        # last_name = request.data.get(
+        #     "last_name",
+        #     ""
+        # )
+
+        # phone = request.data.get(
+        #     "phone",
+        #     ""
+        # )
+
+        # shipping_address = (
+        #     f"{first_name} {last_name}, "
+        #     f"{city}, "
+        #     f"{postal_code}, "
+        #     f"{country}"
+        # ).strip(", ").strip()
+        receiver_name = (
+            f"{request.data.get('first_name','')} "
+            f"{request.data.get('last_name','')}"
+        ).strip()
+
+        phone = request.data.get("phone","")
+
+        address_line_1 = request.data.get(
+            "address_line_1",
             ""
         )
+
+        address_line_2 = request.data.get(
+            "address_line_2",
+            ""
+        )
+
+        city = request.data.get("city","")
+
+        state = request.data.get("state","")
+
+        country = request.data.get("country","")
 
         postal_code = request.data.get(
             "postal_code",
             ""
         )
 
-        country = request.data.get(
-            "country",
-            ""
-        )
-
-        first_name = request.data.get(
-            "first_name",
-            ""
-        )
-
-        last_name = request.data.get(
-            "last_name",
-            ""
-        )
-
-        phone = request.data.get(
-            "phone",
-            ""
-        )
-
         shipping_address = (
-            f"{first_name} {last_name}, "
+            f"{receiver_name}, "
+            f"{address_line_1}, "
+            f"{address_line_2}, "
             f"{city}, "
-            f"{postal_code}, "
-            f"{country}"
-        ).strip(", ").strip()
-
+            f"{state}, "
+            f"{country}, "
+            f"{postal_code}"
+        )
         if not shipping_address:
             return Response(
                 {"error": "shipping address required"},
                 status=400
             )
 
+    # order = Order.objects.create(
+    #     user=(
+    #         request.user
+    #         if request.user.is_authenticated
+    #         else None
+    #     ),
+    #     guest_id=guest_id,
+    #     email=request.data.get("email"),
+    #     phone=phone,
+    #     shipping_address=shipping_address,
+    #     total_amount=total,
+    #     currency=currency
+    # )
     order = Order.objects.create(
+
         user=(
             request.user
             if request.user.is_authenticated
             else None
         ),
+
         guest_id=guest_id,
+
         email=request.data.get("email"),
+
         phone=phone,
+
+        receiver_name=receiver_name,
+
+        address_line_1=address_line_1,
+        address_line_2=address_line_2,
+
+        city=city,
+        state=state,
+        country=country,
+        postal_code=postal_code,
+
         shipping_address=shipping_address,
+
         total_amount=total,
+
         currency=currency
     )
 
