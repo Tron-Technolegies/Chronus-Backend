@@ -552,14 +552,15 @@ class CreatePaymentIntentView(APIView):
 
     def post(self, request):
         try:
-            order_id = request.data.get(id=order_id)
+            # order_id = request.data.get(id=order_id)
+            order_id = request.data.get("order_id")
             if not order_id:
                 return Response(
                     {"error":"order_id required"},
                     status=400
                 )
-            # order = Order.objects.get(id=order_id)
-            order=request.data.get("order_id")
+            order = Order.objects.get(id=order_id)
+        
             
             # currency = request.data.get("currency", "usd").lower()
             currency = order.currency.lower()
