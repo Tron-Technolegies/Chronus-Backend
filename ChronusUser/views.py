@@ -558,7 +558,8 @@ class CreatePaymentIntentView(APIView):
                     {"error":"order_id required"},
                     status=400
                 )
-            order = Order.objects.get(id=order_id)
+            # order = Order.objects.get(id=order_id)
+            order=request.data.get("order_id")
             
             # currency = request.data.get("currency", "usd").lower()
             currency = order.currency.lower()
@@ -585,7 +586,8 @@ class CreatePaymentIntentView(APIView):
                 automatic_payment_methods={"enabled": True},
                 
                 metadata={
-                    "order_id": order.id,
+                    # "order_id": order.id,
+                    "order_id": str(order.id),
                     "currency": currency,
                     "user_id": request.user.id if request.user.is_authenticated else "",
                     "guest_id": order.guest_id or "",

@@ -1084,10 +1084,12 @@ def order_detail_api(request, id):
         "customer": order.user.email if order.user else "Guest",
         "date": order.created_at,
         "status": order.status,
+        "payment_status": order.payment_status,
         "total_price": float(order.total_amount),
-        "tracking_url": order.tracking_link,
+        "tracking_link": order.tracking_link,
         "tracking_number": order.tracking_number,
         "carrier": order.carrier,
+        "shipment_id": order.shipment_id,
         "items": items
     }
 
