@@ -1233,56 +1233,65 @@ import stripe
 from django.conf import settings
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
-import logging
-
-logger = logging.getLogger(__name__)
-
+import time
 
 @csrf_exempt
 def stripe_webhook(request):
-
-    logger.error("🔥 STRIPE WEBHOOK HIT")
+    t0 = time.time()
+    print("🔥 HIT", time.time() - t0)
 
     payload = request.body
     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
 
     try:
-        event = stripe.Webhook.construct_event(
-            payload,
-            sig_header,
-            settings.STRIPE_WEBHOOK_SECRET
-        )
-
+        event = stripe.Webhook.construct_event(payload, sig_header, settings.STRIPE_WEBHOOK_SECRET)
     except Exception as e:
-        logger.error(f"STRIPE SIGNATURE ERROR: {e}")
+        print("sig error:", e)
         return HttpResponse(status=400)
 
-
-    logger.error(f"EVENT: {event['type']}")
-
+    print("✅ event parsed", time.time() - t0)
 
     if event["type"] == "payment_intent.succeeded":
-
         intent = event["data"]["object"]
+        metadata = intent.get("metadata", {})
+        order_id = metadata.get("order_id")
+        print("✅ metadata read", time.time() - t0)
 
-        logger.error(f"INTENT: {intent['id']}")
+        if not order_id:
+            return HttpResponse(status=200)
 
-        order_id = intent["metadata"].get("order_id")
+        try:
+            print("→ about to fetch order", time.time() - t0)
+            order = Order.objects.get(id=int(order_id))
+            print("✅ order fetched", time.time() - t0)
 
-        logger.error(f"ORDER ID: {order_id}")
+            order.payment_status = "paid"
+            order.payment_id = intent["id"]
+            order.status = "processing"
+            print("→ about to save", time.time() - t0)
+            order.save()
+            print("✅ order saved", time.time() - t0)
 
-        Order.objects.filter(
-            id=order_id
-        ).update(
-            payment_status="paid",
-            payment_id=intent["id"],
-            status="processing"
-        )
+            Notification.objects.create(
+                title="Payment Received",
+                message=f"Payment received for Order #{order.id}. Amount: {order.total_amount}"
+            )
+            print("✅ notification created", time.time() - t0)
 
-        logger.error("ORDER UPDATED")
+            if order.user:
+                cart = Cart.objects.filter(user=order.user).first()
+            else:
+                cart = Cart.objects.filter(guest_id=order.guest_id).first()
 
+            if cart:
+                CartItem.objects.filter(cart=cart).delete()
+                print("🛒 cart cleared", time.time() - t0)
 
-    return HttpResponse("OK", status=200)
+        except Order.DoesNotExist:
+            print(f"❌ Order {order_id} not found")
+
+    print("✅ returning 200", time.time() - t0)
+    return HttpResponse(status=200)
 # @csrf_exempt
 # def stripe_webhook(request):
 #     print("🔥 STRIPE WEBHOOK HIT")
@@ -1346,6 +1355,7 @@ def stripe_webhook(request):
 #             print(f"❌ Order {order_id} not found")
 
 #     return HttpResponse(status=200)
+
 
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
