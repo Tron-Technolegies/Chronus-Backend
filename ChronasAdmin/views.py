@@ -1237,6 +1237,9 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 
 @csrf_exempt
 def stripe_webhook(request):
+    print("🔥 STRIPE WEBHOOK HIT")
+
+    
     payload = request.body
     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
 
