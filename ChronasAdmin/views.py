@@ -2140,9 +2140,13 @@ def create_shipment(request, order_id):
             or tracking_number
         )
 
-        tracking_link = response.get(
-            "trackingUrl",
-            ""
+        # tracking_link = response.get(
+        #     "trackingUrl",
+        #     ""
+        # )
+        tracking_link = (
+            "https://www.dhl.com/global-en/home/tracking/"
+            f"tracking-express.html?submit=1&tracking-id={tracking_number}"
         )
 
         order.carrier = "DHL"
