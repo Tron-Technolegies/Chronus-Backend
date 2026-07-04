@@ -1237,61 +1237,11 @@ import time
 
 @csrf_exempt
 def stripe_webhook(request):
-    t0 = time.time()
-    print("🔥 HIT", time.time() - t0)
 
-    payload = request.body
-    sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
+    with open("/tmp/stripe_debug.txt", "a") as f:
+        f.write("WEBHOOK HIT\n")
 
-    try:
-        event = stripe.Webhook.construct_event(payload, sig_header, settings.STRIPE_WEBHOOK_SECRET)
-    except Exception as e:
-        print("sig error:", e)
-        return HttpResponse(status=400)
-
-    print("✅ event parsed", time.time() - t0)
-
-    if event["type"] == "payment_intent.succeeded":
-        intent = event["data"]["object"]
-        metadata = intent.get("metadata", {})
-        order_id = metadata.get("order_id")
-        print("✅ metadata read", time.time() - t0)
-
-        if not order_id:
-            return HttpResponse(status=200)
-
-        try:
-            print("→ about to fetch order", time.time() - t0)
-            order = Order.objects.get(id=int(order_id))
-            print("✅ order fetched", time.time() - t0)
-
-            order.payment_status = "paid"
-            order.payment_id = intent["id"]
-            order.status = "processing"
-            print("→ about to save", time.time() - t0)
-            order.save()
-            print("✅ order saved", time.time() - t0)
-
-            Notification.objects.create(
-                title="Payment Received",
-                message=f"Payment received for Order #{order.id}. Amount: {order.total_amount}"
-            )
-            print("✅ notification created", time.time() - t0)
-
-            if order.user:
-                cart = Cart.objects.filter(user=order.user).first()
-            else:
-                cart = Cart.objects.filter(guest_id=order.guest_id).first()
-
-            if cart:
-                CartItem.objects.filter(cart=cart).delete()
-                print("🛒 cart cleared", time.time() - t0)
-
-        except Order.DoesNotExist:
-            print(f"❌ Order {order_id} not found")
-
-    print("✅ returning 200", time.time() - t0)
-    return HttpResponse(status=200)
+    return HttpResponse("OK", status=200)
 # @csrf_exempt
 # def stripe_webhook(request):
 #     print("🔥 STRIPE WEBHOOK HIT")
