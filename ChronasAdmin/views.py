@@ -1233,71 +1233,109 @@ import stripe
 from django.conf import settings
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
-
-
 @csrf_exempt
 def stripe_webhook(request):
     print("🔥 STRIPE WEBHOOK HIT")
 
-    
-    payload = request.body
-    sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
-
     try:
+        payload = request.body
+        sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
+
         event = stripe.Webhook.construct_event(
             payload,
             sig_header,
             settings.STRIPE_WEBHOOK_SECRET
         )
-    except Exception as e:
-        print("Webhook signature error:", str(e))
-        return HttpResponse(status=400)
 
-    print("WEBHOOK EVENT:", event["type"])
+        print("WEBHOOK EVENT:", event["type"])
 
-    if event["type"] == "payment_intent.succeeded":
-        intent = event["data"]["object"]
+        if event["type"] == "payment_intent.succeeded":
+            intent = event["data"]["object"]
 
-        metadata = intent.get("metadata", {})
-        order_id = metadata.get("order_id")
+            metadata = intent.get("metadata", {})
+            order_id = metadata.get("order_id")
 
-        print("METADATA:", metadata)
-        print("ORDER_ID:", order_id)
+            print("METADATA:", metadata)
+            print("ORDER ID:", order_id)
 
-        if not order_id:
-            print("❌ No order_id in metadata")
-            return HttpResponse(status=200)
-
-        try:
-            order = Order.objects.get(id=int(order_id))
+            order = Order.objects.get(id=order_id)
 
             order.payment_status = "paid"
             order.payment_id = intent["id"]
             order.status = "processing"
             order.save()
 
-            Notification.objects.create(
-                title="Payment Received",
-                message=f"Payment received for Order #{order.id}. Amount: {order.total_amount}"
-            )
+            print("✅ ORDER UPDATED")
 
-            print(f"✅ Order {order_id} marked paid")
+        return HttpResponse("success", status=200)
 
-            # ✅ CLEAR CART AFTER PAYMENT SUCCESS
+    except Exception as e:
+        print("🔥 WEBHOOK ERROR:", str(e))
+        return HttpResponse(str(e), status=500)
 
-            if order.user:
-                cart = Cart.objects.filter(user=order.user).first()
-            else:
-                cart = Cart.objects.filter(guest_id=order.guest_id).first()
+# @csrf_exempt
+# def stripe_webhook(request):
+#     print("🔥 STRIPE WEBHOOK HIT")
 
-            if cart:
-                CartItem.objects.filter(cart=cart).delete()
-                print("🛒 Cart cleared after payment")
+    
+#     payload = request.body
+#     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
 
-        except Order.DoesNotExist:
-            print(f"❌ Order {order_id} not found")
+#     try:
+#         event = stripe.Webhook.construct_event(
+#             payload,
+#             sig_header,
+#             settings.STRIPE_WEBHOOK_SECRET
+#         )
+#     except Exception as e:
+#         print("Webhook signature error:", str(e))
+#         return HttpResponse(status=400)
 
-    return HttpResponse(status=200)
+#     print("WEBHOOK EVENT:", event["type"])
+
+#     if event["type"] == "payment_intent.succeeded":
+#         intent = event["data"]["object"]
+
+#         metadata = intent.get("metadata", {})
+#         order_id = metadata.get("order_id")
+
+#         print("METADATA:", metadata)
+#         print("ORDER_ID:", order_id)
+
+#         if not order_id:
+#             print("❌ No order_id in metadata")
+#             return HttpResponse(status=200)
+
+#         try:
+#             order = Order.objects.get(id=int(order_id))
+
+#             order.payment_status = "paid"
+#             order.payment_id = intent["id"]
+#             order.status = "processing"
+#             order.save()
+
+#             Notification.objects.create(
+#                 title="Payment Received",
+#                 message=f"Payment received for Order #{order.id}. Amount: {order.total_amount}"
+#             )
+
+#             print(f"✅ Order {order_id} marked paid")
+
+#             # ✅ CLEAR CART AFTER PAYMENT SUCCESS
+
+#             if order.user:
+#                 cart = Cart.objects.filter(user=order.user).first()
+#             else:
+#                 cart = Cart.objects.filter(guest_id=order.guest_id).first()
+
+#             if cart:
+#                 CartItem.objects.filter(cart=cart).delete()
+#                 print("🛒 Cart cleared after payment")
+
+#         except Order.DoesNotExist:
+#             print(f"❌ Order {order_id} not found")
+
+#     return HttpResponse(status=200)
 
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
