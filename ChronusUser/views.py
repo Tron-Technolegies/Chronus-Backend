@@ -1134,6 +1134,17 @@ from django.conf import settings
 
 from ChronasAdmin.models import Order
 from .currency import convert_amount
+import requests
+import traceback
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+
+from django.conf import settings
+
+from ChronasAdmin.models import Order
+from .currency import convert_amount
 
 
 class CreateZiinaPayment(APIView):
@@ -1149,6 +1160,7 @@ class CreateZiinaPayment(APIView):
                 "========== ZIINA START ==========",
                 flush=True
             )
+
 
             print(
                 "REQUEST DATA:",
@@ -1172,7 +1184,7 @@ class CreateZiinaPayment(APIView):
                 )
 
 
-            # FIRST GET ORDER
+            # GET ORDER
 
             order = Order.objects.get(
                 id=order_id
@@ -1185,11 +1197,13 @@ class CreateZiinaPayment(APIView):
                 flush=True
             )
 
+
             print(
                 "ORDER CURRENCY:",
                 order.currency,
                 flush=True
             )
+
 
             print(
                 "ORDER TOTAL:",
@@ -1201,6 +1215,7 @@ class CreateZiinaPayment(APIView):
             # SECURITY CHECK
 
             if request.user.is_authenticated:
+
 
                 if order.user != request.user:
 
@@ -1214,15 +1229,18 @@ class CreateZiinaPayment(APIView):
 
             else:
 
+
                 guest_id = request.headers.get(
                     "X-Guest-Id"
                 )
+
 
                 print(
                     "HEADER GUEST:",
                     guest_id,
                     flush=True
                 )
+
 
                 print(
                     "ORDER GUEST:",
@@ -1244,21 +1262,29 @@ class CreateZiinaPayment(APIView):
             currency = order.currency.upper()
 
 
-            # ZIINA ONLY AED
+            # ZIINA SUPPORTED CURRENCIES
 
-            if currency != "AED":
+            supported_currencies = [
+                "AED",
+                "BHD",
+                "EUR",
+                "GBP",
+                "INR",
+                "KWD",
+                "OMR",
+                "QAR",
+                "SAR",
+                "USD"
+            ]
 
-                print(
-                    "ZIINA BLOCKED WRONG CURRENCY:",
-                    currency,
-                    flush=True
-                )
+
+            if currency not in supported_currencies:
 
 
                 return Response(
                     {
-                        "error": "Ziina supports AED only",
-                        "current_currency": currency
+                        "error": "Currency not supported by Ziina",
+                        "currency": currency
                     },
                     status=400
                 )
@@ -1278,14 +1304,18 @@ class CreateZiinaPayment(APIView):
 
             payload = {
 
+
                 "amount": convert_amount(
                     order.total_amount,
                     currency
                 ),
 
+
                 "currency_code": currency,
 
+
                 "message": f"Order {order.id}",
+
 
                 "metadata": {
 
@@ -1315,6 +1345,7 @@ class CreateZiinaPayment(APIView):
                 response.status_code,
                 flush=True
             )
+
 
             print(
                 "ZIINA RESPONSE:",
@@ -1347,6 +1378,7 @@ class CreateZiinaPayment(APIView):
 
         except Order.DoesNotExist:
 
+
             return Response(
                 {
                     "error": "Invalid order"
@@ -1357,17 +1389,21 @@ class CreateZiinaPayment(APIView):
 
         except Exception as e:
 
+
             print(
                 "=========== ZIINA ERROR ===========",
                 flush=True
             )
+
 
             print(
                 str(e),
                 flush=True
             )
 
+
             traceback.print_exc()
+
 
             print(
                 "===================================",
@@ -1380,7 +1416,9 @@ class CreateZiinaPayment(APIView):
                     "error": str(e)
                 },
                 status=500
-            )            
+            )
+
+
 
 # class CreateZiinaPayment(APIView):
 #     permission_classes = [AllowAny]
