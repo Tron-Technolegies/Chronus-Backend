@@ -1894,6 +1894,16 @@ from django.conf import settings
 
 from ChronasAdmin.models import Order
 
+import requests
+import traceback
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+from django.conf import settings
+
+from ChronasAdmin.models import Order
+
 
 class CreateTabbyPayment(APIView):
 
@@ -1910,9 +1920,7 @@ class CreateTabbyPayment(APIView):
             )
 
 
-            order_id = request.data.get(
-                "order_id"
-            )
+            order_id = request.data.get("order_id")
 
 
             if not order_id:
@@ -1948,7 +1956,6 @@ class CreateTabbyPayment(APIView):
 
             if request.user.is_authenticated:
 
-
                 if order.user != request.user:
 
                     return Response(
@@ -1961,14 +1968,12 @@ class CreateTabbyPayment(APIView):
 
             else:
 
-
                 guest_id = request.headers.get(
                     "X-Guest-Id"
                 )
 
 
                 if not guest_id or order.guest_id != guest_id:
-
 
                     return Response(
                         {
@@ -1991,7 +1996,6 @@ class CreateTabbyPayment(APIView):
 
 
             if currency not in supported_currencies:
-
 
                 return Response(
                     {
@@ -2033,14 +2037,14 @@ class CreateTabbyPayment(APIView):
 
                     "buyer": {
 
-
                         "email": order.email,
-
 
                         "phone": order.phone,
 
-
-                        "name": order.receiver_name or "Customer"
+                        "name": (
+                            order.receiver_name
+                            or "Customer"
+                        )
 
                     },
 
@@ -2090,12 +2094,9 @@ class CreateTabbyPayment(APIView):
 
                     "shipping_address": {
 
-
                         "address": order.shipping_address,
 
-
                         "city": order.city,
-
 
                         "country": order.country
 
@@ -2123,15 +2124,15 @@ class CreateTabbyPayment(APIView):
 
 
                     "success":
-                        "https://chronosgallery.com/payment-success",
+                    "https://chronosgallery.com/payment-success",
 
 
                     "cancel":
-                        "https://chronosgallery.com/payment-cancel",
+                    "https://chronosgallery.com/payment-cancel",
 
 
                     "failure":
-                        "https://chronosgallery.com/payment-failure"
+                    "https://chronosgallery.com/payment-failure"
 
                 }
 
@@ -2167,17 +2168,9 @@ class CreateTabbyPayment(APIView):
             )
 
 
-            # SAFE JSON HANDLING
-
             try:
 
-                if response.text:
-
-                    data = response.json()
-
-                else:
-
-                    data = {}
+                data = response.json()
 
 
             except Exception:
@@ -2194,7 +2187,6 @@ class CreateTabbyPayment(APIView):
 
             if response.status_code not in [200, 201]:
 
-
                 return Response(
                     {
                         "error": data
@@ -2203,9 +2195,12 @@ class CreateTabbyPayment(APIView):
                 )
 
 
-            # GET CHECKOUT URL
+            # FIXED CHECKOUT URL EXTRACTION
 
-            payment_url = (
+            payment_url = None
+
+
+            installments = (
                 data.get(
                     "configuration",
                     {}
@@ -2216,15 +2211,23 @@ class CreateTabbyPayment(APIView):
                 )
                 .get(
                     "installments",
-                    {}
-                )
-                .get(
-                    "web_url"
+                    []
                 )
             )
 
 
-            # fallback
+            if (
+                installments
+                and isinstance(
+                    installments,
+                    list
+                )
+            ):
+
+                payment_url = installments[0].get(
+                    "web_url"
+                )
+
 
             if not payment_url:
 
@@ -2233,12 +2236,20 @@ class CreateTabbyPayment(APIView):
                 )
 
 
+            print(
+                "TABBY PAYMENT URL:",
+                payment_url,
+                flush=True
+            )
+
+
             return Response(
                 {
 
                     "payment_id": data.get(
                         "id"
                     ),
+
 
                     "payment_url": payment_url
 
