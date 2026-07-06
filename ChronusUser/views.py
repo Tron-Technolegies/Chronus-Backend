@@ -1133,6 +1133,7 @@ class CreateZiinaPayment(APIView):
         try:
 
             print("========== ZIINA START ==========", flush=True)
+            print("REQUEST DATA:", request.data, flush=True)
 
             print(
                 "REQUEST DATA:",
