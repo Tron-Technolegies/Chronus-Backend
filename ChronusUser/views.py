@@ -1132,7 +1132,7 @@ class CreateZiinaPayment(APIView):
 
         try:
 
-            print("========== ZIINA START ==========")
+            print("========== ZIINA START ==========", flush=True)
 
             print(
                 "REQUEST DATA:",
@@ -1336,7 +1336,7 @@ class CreateZiinaPayment(APIView):
                 status=500
             )
         
-        
+
 # class CreateZiinaPayment(APIView):
 #     permission_classes = [AllowAny]
 
