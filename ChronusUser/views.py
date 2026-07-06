@@ -1123,6 +1123,19 @@ from ChronasAdmin.models import Order
 from .currency import convert_amount
 
 
+import requests
+import traceback
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+
+from django.conf import settings
+
+from ChronasAdmin.models import Order
+from .currency import convert_amount
+
+
 class CreateZiinaPayment(APIView):
 
     permission_classes = [AllowAny]
@@ -1132,47 +1145,20 @@ class CreateZiinaPayment(APIView):
 
         try:
 
-            print("========== ZIINA START ==========", flush=True)
-            print("REQUEST DATA:", request.data, flush=True)
+            print(
+                "========== ZIINA START ==========",
+                flush=True
+            )
 
             print(
                 "REQUEST DATA:",
-                request.data
+                request.data,
+                flush=True
             )
 
 
             order_id = request.data.get(
                 "order_id"
-            )
-
-            print(
-                "ORDER FOUND:",
-                order.id,
-                flush=True
-            )
-
-            print(
-                "ORDER USER:",
-                order.user,
-                flush=True
-            )
-
-            print(
-                "ORDER GUEST:",
-                order.guest_id,
-                flush=True
-            )
-
-            print(
-                "HEADER GUEST:",
-                request.headers.get("X-Guest-Id"),
-                flush=True
-            )
-
-            print(
-                "ORDER CURRENCY:",
-                order.currency,
-                flush=True
             )
 
 
@@ -1186,8 +1172,29 @@ class CreateZiinaPayment(APIView):
                 )
 
 
+            # FIRST GET ORDER
+
             order = Order.objects.get(
                 id=order_id
+            )
+
+
+            print(
+                "ORDER FOUND:",
+                order.id,
+                flush=True
+            )
+
+            print(
+                "ORDER CURRENCY:",
+                order.currency,
+                flush=True
+            )
+
+            print(
+                "ORDER TOTAL:",
+                order.total_amount,
+                flush=True
             )
 
 
@@ -1204,6 +1211,7 @@ class CreateZiinaPayment(APIView):
                         status=403
                     )
 
+
             else:
 
                 guest_id = request.headers.get(
@@ -1211,8 +1219,15 @@ class CreateZiinaPayment(APIView):
                 )
 
                 print(
-                    "GUEST ID:",
-                    guest_id
+                    "HEADER GUEST:",
+                    guest_id,
+                    flush=True
+                )
+
+                print(
+                    "ORDER GUEST:",
+                    order.guest_id,
+                    flush=True
                 )
 
 
@@ -1229,35 +1244,20 @@ class CreateZiinaPayment(APIView):
             currency = order.currency.upper()
 
 
-            print(
-                "ORDER ID:",
-                order.id
-            )
-
-            print(
-                "ORDER CURRENCY:",
-                currency
-            )
-
-            print(
-                "ORDER TOTAL:",
-                order.total_amount
-            )
-
-
-            # Ziina supports AED only
+            # ZIINA ONLY AED
 
             if currency != "AED":
 
                 print(
                     "ZIINA BLOCKED WRONG CURRENCY:",
-                    currency
+                    currency,
+                    flush=True
                 )
 
 
                 return Response(
                     {
-                        "error": "Ziina currently supports AED payments only",
+                        "error": "Ziina supports AED only",
                         "current_currency": currency
                     },
                     status=400
@@ -1298,7 +1298,8 @@ class CreateZiinaPayment(APIView):
 
             print(
                 "ZIINA PAYLOAD:",
-                payload
+                payload,
+                flush=True
             )
 
 
@@ -1311,19 +1312,21 @@ class CreateZiinaPayment(APIView):
 
             print(
                 "ZIINA STATUS:",
-                response.status_code
+                response.status_code,
+                flush=True
             )
 
             print(
                 "ZIINA RESPONSE:",
-                response.text
+                response.text,
+                flush=True
             )
 
 
             data = response.json()
 
 
-            if response.status_code not in [200,201]:
+            if response.status_code not in [200, 201]:
 
                 return Response(
                     {
@@ -1354,9 +1357,10 @@ class CreateZiinaPayment(APIView):
 
         except Exception as e:
 
-            import traceback
-
-            print("=========== ZIINA ERROR ===========", flush=True)
+            print(
+                "=========== ZIINA ERROR ===========",
+                flush=True
+            )
 
             print(
                 str(e),
@@ -1365,7 +1369,10 @@ class CreateZiinaPayment(APIView):
 
             traceback.print_exc()
 
-            print("===================================", flush=True)
+            print(
+                "===================================",
+                flush=True
+            )
 
 
             return Response(
@@ -1373,8 +1380,7 @@ class CreateZiinaPayment(APIView):
                     "error": str(e)
                 },
                 status=500
-            )
-            
+            )            
 
 # class CreateZiinaPayment(APIView):
 #     permission_classes = [AllowAny]
