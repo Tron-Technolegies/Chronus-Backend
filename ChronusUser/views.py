@@ -1883,6 +1883,18 @@ def track_order(request, order_id):
         
 from .currency import convert_amount
 
+import requests
+import traceback
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+
+from django.conf import settings
+
+from ChronasAdmin.models import Order
+
+
 class CreateTabbyPayment(APIView):
 
     permission_classes = [AllowAny]
@@ -1892,7 +1904,15 @@ class CreateTabbyPayment(APIView):
 
         try:
 
-            order_id = request.data.get("order_id")
+            print(
+                "========== TABBY START ==========",
+                flush=True
+            )
+
+
+            order_id = request.data.get(
+                "order_id"
+            )
 
 
             if not order_id:
@@ -1907,6 +1927,20 @@ class CreateTabbyPayment(APIView):
 
             order = Order.objects.get(
                 id=order_id
+            )
+
+
+            print(
+                "ORDER:",
+                order.id,
+                flush=True
+            )
+
+
+            print(
+                "ORDER TOTAL:",
+                order.total_amount,
+                flush=True
             )
 
 
@@ -1927,12 +1961,14 @@ class CreateTabbyPayment(APIView):
 
             else:
 
+
                 guest_id = request.headers.get(
                     "X-Guest-Id"
                 )
 
 
                 if not guest_id or order.guest_id != guest_id:
+
 
                     return Response(
                         {
@@ -1945,8 +1981,6 @@ class CreateTabbyPayment(APIView):
             currency = order.currency.upper()
 
 
-            # TABBY SUPPORTED CURRENCIES
-
             supported_currencies = [
                 "AED",
                 "SAR",
@@ -1957,6 +1991,7 @@ class CreateTabbyPayment(APIView):
 
 
             if currency not in supported_currencies:
+
 
                 return Response(
                     {
@@ -2013,7 +2048,9 @@ class CreateTabbyPayment(APIView):
                     "order": {
 
 
-                        "reference_id": str(order.id),
+                        "reference_id": str(
+                            order.id
+                        ),
 
 
                         "items": [
@@ -2085,13 +2122,16 @@ class CreateTabbyPayment(APIView):
                 "merchant_urls": {
 
 
-                    "success": "https://chronosgallery.com/payment-success",
+                    "success":
+                        "https://chronosgallery.com/payment-success",
 
 
-                    "cancel": "https://chronosgallery.com/payment-cancel",
+                    "cancel":
+                        "https://chronosgallery.com/payment-cancel",
 
 
-                    "failure": "https://chronosgallery.com/payment-failure"
+                    "failure":
+                        "https://chronosgallery.com/payment-failure"
 
                 }
 
@@ -2121,16 +2161,38 @@ class CreateTabbyPayment(APIView):
 
 
             print(
-                "TABBY RESPONSE:",
+                "TABBY RAW RESPONSE:",
                 response.text,
                 flush=True
             )
 
 
-            data = response.json()
+            # SAFE JSON HANDLING
+
+            try:
+
+                if response.text:
+
+                    data = response.json()
+
+                else:
+
+                    data = {}
 
 
-            if response.status_code not in [200,201]:
+            except Exception:
+
+
+                return Response(
+                    {
+                        "error": "Invalid Tabby response",
+                        "response": response.text
+                    },
+                    status=500
+                )
+
+
+            if response.status_code not in [200, 201]:
 
 
                 return Response(
@@ -2141,28 +2203,44 @@ class CreateTabbyPayment(APIView):
                 )
 
 
+            # GET CHECKOUT URL
+
+            payment_url = (
+                data.get(
+                    "configuration",
+                    {}
+                )
+                .get(
+                    "available_products",
+                    {}
+                )
+                .get(
+                    "installments",
+                    {}
+                )
+                .get(
+                    "web_url"
+                )
+            )
+
+
+            # fallback
+
+            if not payment_url:
+
+                payment_url = data.get(
+                    "web_url"
+                )
+
+
             return Response(
                 {
 
-                    "payment_id": data.get("id"),
+                    "payment_id": data.get(
+                        "id"
+                    ),
 
-
-                    "payment_url":
-                        data.get(
-                            "configuration",
-                            {}
-                        )
-                        .get(
-                            "available_products",
-                            {}
-                        )
-                        .get(
-                            "installments",
-                            {}
-                        )
-                        .get(
-                            "web_url"
-                        )
+                    "payment_url": payment_url
 
                 }
             )
@@ -2173,7 +2251,7 @@ class CreateTabbyPayment(APIView):
 
             return Response(
                 {
-                    "error":"Invalid order"
+                    "error": "Invalid order"
                 },
                 status=404
             )
@@ -2182,14 +2260,24 @@ class CreateTabbyPayment(APIView):
         except Exception as e:
 
 
-            import traceback
+            print(
+                "=========== TABBY ERROR ===========",
+                flush=True
+            )
+
+
+            print(
+                str(e),
+                flush=True
+            )
+
 
             traceback.print_exc()
 
 
             return Response(
                 {
-                    "error":str(e)
+                    "error": str(e)
                 },
                 status=500
             )
