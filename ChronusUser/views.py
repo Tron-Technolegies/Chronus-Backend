@@ -1111,45 +1111,142 @@ from rest_framework.permissions import AllowAny
 from django.conf import settings
 from ChronasAdmin.models import Order
 from .currency import convert_amount
+import requests
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+
+from django.conf import settings
+
+from ChronasAdmin.models import Order
+from .currency import convert_amount
+
 
 class CreateZiinaPayment(APIView):
+
     permission_classes = [AllowAny]
 
+
     def post(self, request):
+
         try:
-            order_id = request.data.get("order_id")
+
+            print("========== ZIINA START ==========")
+
+            print(
+                "REQUEST DATA:",
+                request.data
+            )
+
+
+            order_id = request.data.get(
+                "order_id"
+            )
+
 
             if not order_id:
-                return Response({"error": "order_id required"}, status=400)
 
-            order = Order.objects.get(id=order_id)
-
-            # same security logic you used
-            if request.user.is_authenticated:
-                if order.user != request.user:
-                    return Response({"error": "Unauthorized order access"}, status=403)
-
-            else:
-                guest_id = request.headers.get("X-Guest-Id")
-
-                if not guest_id or order.guest_id != guest_id:
-                    return Response({"error": "Unauthorized guest order"}, status=403)
-
-            url = "https://api-v2.ziina.com/api/payment_intent"
-
-            headers = {
-                "Authorization": f"Bearer {settings.ZIINA_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            currency = order.currency.upper()
-            if currency != "AED":
                 return Response(
                     {
-                        "error": "Ziina currently supports AED payments only"
+                        "error": "order_id required"
                     },
                     status=400
                 )
+
+
+            order = Order.objects.get(
+                id=order_id
+            )
+
+
+            # SECURITY CHECK
+
+            if request.user.is_authenticated:
+
+                if order.user != request.user:
+
+                    return Response(
+                        {
+                            "error": "Unauthorized order access"
+                        },
+                        status=403
+                    )
+
+            else:
+
+                guest_id = request.headers.get(
+                    "X-Guest-Id"
+                )
+
+                print(
+                    "GUEST ID:",
+                    guest_id
+                )
+
+
+                if not guest_id or order.guest_id != guest_id:
+
+                    return Response(
+                        {
+                            "error": "Unauthorized guest order"
+                        },
+                        status=403
+                    )
+
+
+            currency = order.currency.upper()
+
+
+            print(
+                "ORDER ID:",
+                order.id
+            )
+
+            print(
+                "ORDER CURRENCY:",
+                currency
+            )
+
+            print(
+                "ORDER TOTAL:",
+                order.total_amount
+            )
+
+
+            # Ziina supports AED only
+
+            if currency != "AED":
+
+                print(
+                    "ZIINA BLOCKED WRONG CURRENCY:",
+                    currency
+                )
+
+
+                return Response(
+                    {
+                        "error": "Ziina currently supports AED payments only",
+                        "current_currency": currency
+                    },
+                    status=400
+                )
+
+
+            url = "https://api-v2.ziina.com/api/payment_intent"
+
+
+            headers = {
+
+                "Authorization": f"Bearer {settings.ZIINA_API_KEY}",
+
+                "Content-Type": "application/json"
+
+            }
+
+
             payload = {
+
                 "amount": convert_amount(
                     order.total_amount,
                     currency
@@ -1160,15 +1257,43 @@ class CreateZiinaPayment(APIView):
                 "message": f"Order {order.id}",
 
                 "metadata": {
+
                     "order_id": str(order.id)
+
                 }
+
             }
 
-            response = requests.post(url, json=payload, headers=headers)
+
+            print(
+                "ZIINA PAYLOAD:",
+                payload
+            )
+
+
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers
+            )
+
+
+            print(
+                "ZIINA STATUS:",
+                response.status_code
+            )
+
+            print(
+                "ZIINA RESPONSE:",
+                response.text
+            )
+
 
             data = response.json()
 
-            if response.status_code not in [200, 201]:
+
+            if response.status_code not in [200,201]:
+
                 return Response(
                     {
                         "error": data
@@ -1176,15 +1301,115 @@ class CreateZiinaPayment(APIView):
                     status=response.status_code
                 )
 
-            return Response({
-                "payment_url": data.get("redirect_url")
-            })
+
+            return Response(
+                {
+                    "payment_url": data.get(
+                        "redirect_url"
+                    )
+                }
+            )
+
 
         except Order.DoesNotExist:
-            return Response({"error": "Invalid order"}, status=404)
+
+            return Response(
+                {
+                    "error": "Invalid order"
+                },
+                status=404
+            )
+
 
         except Exception as e:
-            return Response({"error": str(e)}, status=500)
+
+            print(
+                "ZIINA EXCEPTION:",
+                str(e)
+            )
+
+
+            return Response(
+                {
+                    "error": str(e)
+                },
+                status=500
+            )
+        
+        
+# class CreateZiinaPayment(APIView):
+#     permission_classes = [AllowAny]
+
+#     def post(self, request):
+#         try:
+#             order_id = request.data.get("order_id")
+
+#             if not order_id:
+#                 return Response({"error": "order_id required"}, status=400)
+
+#             order = Order.objects.get(id=order_id)
+
+#             # same security logic you used
+#             if request.user.is_authenticated:
+#                 if order.user != request.user:
+#                     return Response({"error": "Unauthorized order access"}, status=403)
+
+#             else:
+#                 guest_id = request.headers.get("X-Guest-Id")
+
+#                 if not guest_id or order.guest_id != guest_id:
+#                     return Response({"error": "Unauthorized guest order"}, status=403)
+
+#             url = "https://api-v2.ziina.com/api/payment_intent"
+
+#             headers = {
+#                 "Authorization": f"Bearer {settings.ZIINA_API_KEY}",
+#                 "Content-Type": "application/json"
+#             }
+#             currency = order.currency.upper()
+#             if currency != "AED":
+#                 return Response(
+#                     {
+#                         "error": "Ziina currently supports AED payments only"
+#                     },
+#                     status=400
+#                 )
+#             payload = {
+#                 "amount": convert_amount(
+#                     order.total_amount,
+#                     currency
+#                 ),
+
+#                 "currency_code": currency,
+
+#                 "message": f"Order {order.id}",
+
+#                 "metadata": {
+#                     "order_id": str(order.id)
+#                 }
+#             }
+
+#             response = requests.post(url, json=payload, headers=headers)
+
+#             data = response.json()
+
+#             if response.status_code not in [200, 201]:
+#                 return Response(
+#                     {
+#                         "error": data
+#                     },
+#                     status=response.status_code
+#                 )
+
+#             return Response({
+#                 "payment_url": data.get("redirect_url")
+#             })
+
+#         except Order.DoesNotExist:
+#             return Response({"error": "Invalid order"}, status=404)
+
+#         except Exception as e:
+#             return Response({"error": str(e)}, status=500)
         
 
 
