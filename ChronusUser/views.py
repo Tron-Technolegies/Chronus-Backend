@@ -1145,6 +1145,36 @@ class CreateZiinaPayment(APIView):
                 "order_id"
             )
 
+            print(
+                "ORDER FOUND:",
+                order.id,
+                flush=True
+            )
+
+            print(
+                "ORDER USER:",
+                order.user,
+                flush=True
+            )
+
+            print(
+                "ORDER GUEST:",
+                order.guest_id,
+                flush=True
+            )
+
+            print(
+                "HEADER GUEST:",
+                request.headers.get("X-Guest-Id"),
+                flush=True
+            )
+
+            print(
+                "ORDER CURRENCY:",
+                order.currency,
+                flush=True
+            )
+
 
             if not order_id:
 
