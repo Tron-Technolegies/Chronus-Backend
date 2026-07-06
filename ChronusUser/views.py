@@ -1354,10 +1354,18 @@ class CreateZiinaPayment(APIView):
 
         except Exception as e:
 
+            import traceback
+
+            print("=========== ZIINA ERROR ===========", flush=True)
+
             print(
-                "ZIINA EXCEPTION:",
-                str(e)
+                str(e),
+                flush=True
             )
+
+            traceback.print_exc()
+
+            print("===================================", flush=True)
 
 
             return Response(
@@ -1366,7 +1374,7 @@ class CreateZiinaPayment(APIView):
                 },
                 status=500
             )
-        
+            
 
 # class CreateZiinaPayment(APIView):
 #     permission_classes = [AllowAny]
