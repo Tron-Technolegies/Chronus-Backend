@@ -30,6 +30,7 @@ class Brand(models.Model):
 
     def __str__(self):
         return self.name
+    
 class Frame(models.Model):
     name = models.CharField(max_length=50)   # Black, Gold, Silver
     image = CloudinaryField("frame_image", blank=True, null=True)
@@ -50,14 +51,27 @@ class Supplier(models.Model):
     email = models.EmailField(blank=True, null=True)
     phone = models.CharField(max_length=20, blank=True, null=True)
 
+    wechat_id = models.CharField(max_length=100, blank=True, null=True)
+    country = models.CharField(max_length=100, blank=True, null=True)
+    address = models.TextField(blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
+
     def __str__(self):
         return self.name
     
 class Product(models.Model):
+    PRODUCT_TYPE_CHOICES = (
+    ("fine_art", "Fine Art"),
+    ("variant", "Variant Product"),
+    )
+
+    
     GENDER_CHOICES = (
         ("men", "Men"),
         ("women", "Women"),
     )
+
+
     name = models.CharField(max_length=200)
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True)
     subcategory = models.ForeignKey(
@@ -84,10 +98,13 @@ class Product(models.Model):
     is_published = models.BooleanField(default=True)
     
     
+    
     weight = models.DecimalField(max_digits=8,decimal_places=2,default=0.50,help_text="Weight in kilograms")
     length = models.DecimalField(max_digits=8,decimal_places=2,default=10.00,help_text="Length in centimeters")
     width = models.DecimalField(max_digits=8,decimal_places=2,default=10.00,help_text="Width in centimeters")
     height = models.DecimalField(max_digits=8,decimal_places=2,default=10.00,help_text="Height in centimeters")
+
+    product_type = models.CharField(max_length=20,choices=PRODUCT_TYPE_CHOICES,default="variant")
 
     def __str__(self):
         return self.name
@@ -121,6 +138,34 @@ class ProductImage(models.Model):
     def __str__(self):
         return f"{self.product.name} image" 
     
+
+
+class ProductVariant(models.Model):
+    product = models.ForeignKey(Product,on_delete=models.CASCADE,related_name="variants")
+    sku = models.CharField(max_length=100,unique=True)
+    stock = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+   
+    def __str__(self):
+        return f"{self.product.name} ({self.sku})"
+    
+class ProductVariantOption(models.Model):
+    variant = models.ForeignKey(ProductVariant,on_delete=models.CASCADE,related_name="options")
+    option_name = models.CharField(max_length=100)
+    option_value = models.CharField(max_length=100)
+
+    def __str__(self):
+        return f"{self.option_name}: {self.option_value}"
+
+
+class ProductVariantImage(models.Model):
+    variant = models.ForeignKey(ProductVariant,on_delete=models.CASCADE,related_name="images")
+    image = CloudinaryField("variant_image")
+    order = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.variant.sku} Image"
+
 
 class Order(models.Model):
     STATUS_CHOICES = (

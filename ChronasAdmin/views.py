@@ -282,7 +282,9 @@ import json
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from django.db import transaction
 
+@transaction.atomic
 @csrf_exempt
 @require_http_methods(["POST"])
 def add_products(request):
@@ -308,6 +310,12 @@ def add_products(request):
         length = request.POST.get("length", 10.00)
         width = request.POST.get("width", 10.00)
         height = request.POST.get("height", 10.00)
+
+
+        product_type = request.POST.get(
+            "product_type",
+            "variant"
+        )
 
         if supplier_id:
             supplier = Supplier.objects.filter(id=supplier_id).first()
@@ -347,6 +355,8 @@ def add_products(request):
 
         if not price:
             return JsonResponse({"error": "Price is required"}, status=400)
+        
+
 
         category = None
         if category_id:
@@ -371,6 +381,7 @@ def add_products(request):
 
         product = Product.objects.create(
             supplier=supplier,
+            product_type=product_type,
             name=name,
             category=category,
             subcategory=subcategory,
@@ -389,103 +400,210 @@ def add_products(request):
             length=length,
             width=width,
             height=height,
+
         )
-        if frame_ids:
-            product.frames.set(frame_ids)
+        if product.product_type == "fine_art":
+            if frame_ids:
+                product.frames.set(frame_ids)
 
-        if material_ids:
-            product.materials.set(material_ids)
+            if material_ids:
+                product.materials.set(material_ids)
 
-        # ------------------------
-        # ADD SIZES
-        # ------------------------
-        sizes = request.POST.get("sizes")
+            # ------------------------
+            # ADD SIZES
+            # ------------------------
+            sizes = request.POST.get("sizes")
 
-        if sizes:
+            if sizes:
+                try:
+                    sizes = json.loads(sizes)
+
+                    for item in sizes:
+                        FineArtSize.objects.create(
+                            product=product,
+                            size=item.get("size"),
+                            price=item.get("price")
+                        )
+
+                except json.JSONDecodeError:
+                    return JsonResponse({"error": "Invalid sizes format"}, status=400)
+
+            # ------------------------
+            # ADD COLORS
+            # ------------------------
+            colors = request.POST.get("colors")
+
+            if colors:
+                try:
+                    colors = json.loads(colors)
+
+                    for index, color in enumerate(colors):
+                        color_image = request.FILES.get(f"color_image_{index}")
+
+                        ProductColor.objects.create(
+                            product=product,
+                            color_name=color.get("color_name"),
+                            image=color_image
+                        )
+
+                except json.JSONDecodeError:
+                    return JsonResponse({"error": "Invalid colors format"}, status=400)
+
+            # ------------------------
+            # ADD GALLERY IMAGES
+            # ------------------------
+            gallery_images = request.FILES.getlist("images")
+
+            for img in gallery_images:
+                ProductImage.objects.create(
+                    product=product,
+                    image=img
+                )
+
+            # ------------------------
+            # FETCH COLORS FOR RESPONSE
+            # ------------------------
+            colors = ProductColor.objects.filter(product=product)
+
+            color_data = [
+                {
+                    "color_name": c.color_name,
+                    "image": c.image.url if c.image else None
+                }
+                for c in colors
+            ]
+
+            return JsonResponse({
+                "id": product.id,
+                "name": product.name,
+                "category": product.category.id if product.category else None,
+                "brand": product.brand.id if product.brand else None,
+                "price": str(product.price),
+                "supplier": {
+                        "id": product.supplier.id,
+                        "name": product.supplier.name
+                    } if product.supplier else None,
+                "subcategory": {
+                    "id": product.subcategory.id,
+                    "name": product.subcategory.name
+                } if product.subcategory else None,
+                "description": product.description,
+                "stock": product.stock,
+                "image": product.image.url if product.image else None,
+                "specification": product.specification,
+                "colors": color_data,
+                "created_at": product.created_at,
+
+                "weight": str(product.weight),
+                "length": str(product.length),
+                "width": str(product.width),
+                "height": str(product.height),
+
+               
+            }, status=201)
+        else:
+            variants = request.POST.get("variants")
+
+            if not variants:
+                return JsonResponse(
+                    {"error": "Variants are required."},
+                    status=400
+                )
+
             try:
-                sizes = json.loads(sizes)
+                variants = json.loads(variants)
+            except json.JSONDecodeError:
+                return JsonResponse(
+                    {"error": "Invalid variants format."},
+                    status=400
+                )
+            # variant_response = []
 
-                for item in sizes:
-                    FineArtSize.objects.create(
-                        product=product,
-                        size=item.get("size"),
-                        price=item.get("price")
+            for index, variant in enumerate(variants):
+
+                sku = variant.get("sku")
+                try:
+                    stock = int(variant.get("stock", 0))
+                except (TypeError, ValueError):
+                    return JsonResponse(
+                        {"error": "Invalid variant stock."},
+                        status=400
+                    )
+                options = variant.get("options", [])
+
+                if not sku:
+                    return JsonResponse(
+                        {"error": "Each variant must have a SKU."},
+                        status=400
                     )
 
-            except json.JSONDecodeError:
-                return JsonResponse({"error": "Invalid sizes format"}, status=400)
-
-        # ------------------------
-        # ADD COLORS
-        # ------------------------
-        colors = request.POST.get("colors")
-
-        if colors:
-            try:
-                colors = json.loads(colors)
-
-                for index, color in enumerate(colors):
-                    color_image = request.FILES.get(f"color_image_{index}")
-
-                    ProductColor.objects.create(
-                        product=product,
-                        color_name=color.get("color_name"),
-                        image=color_image
+                if ProductVariant.objects.filter(sku=sku).exists():
+                    return JsonResponse(
+                        {"error": f"SKU '{sku}' already exists."},
+                        status=400
                     )
 
-            except json.JSONDecodeError:
-                return JsonResponse({"error": "Invalid colors format"}, status=400)
+                created_variant = ProductVariant.objects.create(
+                    product=product,
+                    sku=sku,
+                    stock=stock
+                )
 
-        # ------------------------
-        # ADD GALLERY IMAGES
-        # ------------------------
-        gallery_images = request.FILES.getlist("images")
+                # ------------------------
+                # SAVE OPTIONS
+                # ------------------------
+                for option in options:
+                    ProductVariantOption.objects.create(
+                        variant=created_variant,
+                        option_name=option.get("option_name"),
+                        option_value=option.get("option_value")
+                    )
 
-        for img in gallery_images:
-            ProductImage.objects.create(
-                product=product,
-                image=img
+                    # ------------------------
+                    # SAVE VARIANT IMAGES
+                    # ------------------------
+                variant_images = request.FILES.getlist(
+                    f"variant_images_{index}"
+                )
+
+                for order, img in enumerate(variant_images):
+                    ProductVariantImage.objects.create(
+                        variant=created_variant,
+                        image=img,
+                        order=order
+                    )
+            variant_data = []
+
+            for variant in product.variants.prefetch_related(
+                "options",
+                "images"
+            ):
+                variant_data.append({
+                    "id": variant.id,
+                    "sku": variant.sku,
+                    "stock": variant.stock,
+                    "options": [
+                        {
+                            "option_name": option.option_name,
+                            "option_value": option.option_value,
+                        }
+                        for option in variant.options.all()
+                    ],
+                    "images": [
+                        image.image.url
+                        for image in variant.images.all()
+                    ]
+                })
+
+            return JsonResponse(
+                {
+                    "message": "Variant product created successfully.",
+                    "product_id": product.id,
+                    "total_variants": len(variant_data),
+                    "variants": variant_data
+                },
+                status=201
             )
-
-        # ------------------------
-        # FETCH COLORS FOR RESPONSE
-        # ------------------------
-        colors = ProductColor.objects.filter(product=product)
-
-        color_data = [
-            {
-                "color_name": c.color_name,
-                "image": c.image.url if c.image else None
-            }
-            for c in colors
-        ]
-
-        return JsonResponse({
-            "id": product.id,
-            "name": product.name,
-            "category": product.category.id if product.category else None,
-            "brand": product.brand.id if product.brand else None,
-            "price": str(product.price),
-            "supplier": {
-                    "id": product.supplier.id,
-                    "name": product.supplier.name
-                } if product.supplier else None,
-            "subcategory": {
-                "id": product.subcategory.id,
-                "name": product.subcategory.name
-            } if product.subcategory else None,
-            "description": product.description,
-            "stock": product.stock,
-            "image": product.image.url if product.image else None,
-            "specification": product.specification,
-            "colors": color_data,
-            "created_at": product.created_at,
-
-            "weight": str(product.weight),
-            "length": str(product.length),
-            "width": str(product.width),
-            "height": str(product.height),
-        }, status=201)
 
     except Exception as e:
         return JsonResponse({
@@ -511,7 +629,7 @@ def view_products(request):
     search = request.GET.get("search")
     min_price = request.GET.get("min_price")
     max_price = request.GET.get("max_price")
-
+    
     low_stock = request.GET.get("low_stock")
     try:
         stock_threshold = int(
@@ -532,15 +650,19 @@ def view_products(request):
     offset = (page - 1) * limit
 
     products = Product.objects.select_related(
-        "category", "subcategory", "brand", "supplier"
-    ).prefetch_related(
-        "sizes",
-        "colors",
-        "gallery",
-        "frames",
-        "materials"
-        
-    )
+            "category",
+            "subcategory",
+            "brand",
+            "supplier"
+        ).prefetch_related(
+            "sizes",
+            "colors",
+            "gallery",
+            "frames",
+            "materials",
+            "variants__options",
+            "variants__images",
+        )
 
     # CATEGORY FILTER
     if category:
@@ -568,8 +690,16 @@ def view_products(request):
     # LOW STOCK FILTER    
     if low_stock and low_stock.lower() == "true":
         products = products.filter(
-            stock__lte=stock_threshold
-        )
+            Q(
+                product_type="fine_art",
+                stock__lte=stock_threshold
+            ) |
+            Q(
+                product_type="variant",
+                variants__stock__lte=stock_threshold
+            )
+        ).distinct()
+
 
     is_featured = request.GET.get("is_featured")
     if is_featured:
@@ -601,13 +731,44 @@ def view_products(request):
     products = products[offset:offset + limit]
 
     data = []
+    
 
     for product in products:
+        variants = []
+
+        if product.product_type == "variant":
+
+            variants = [
+                {
+                    "id": variant.id,
+                    "sku": variant.sku,
+                    "stock": variant.stock,
+                    "is_active": variant.is_active,
+
+                    "options": [
+                        {
+                            "option_name": option.option_name,
+                            "option_value": option.option_value,
+                        }
+                        for option in variant.options.all()
+                    ],
+
+                    "images": [
+                        image.image.url
+                        for image in variant.images.all()
+                        if image.image
+                    ]
+                }
+                for variant in product.variants.all()
+            ]
 
         data.append({
             "id": product.id,
 
             "name": product.name,
+
+            "product_type": product.product_type,
+
 
             "category": {
                 "id": product.category.id,
@@ -633,7 +794,11 @@ def view_products(request):
 
             "description": product.description,
 
-            "stock": product.stock,
+            "stock": (
+                product.stock
+                if product.product_type == "fine_art"
+                else None
+            ),
 
             "image": product.image.url if product.image else None,
 
@@ -689,7 +854,18 @@ def view_products(request):
                 }
                 for m in product.materials.all()
             ],
-            "is_low_stock": product.stock <= stock_threshold,
+
+            "variants": variants,
+
+            "is_low_stock": (
+                product.stock <= stock_threshold
+                if product.product_type == "fine_art"
+                else any(
+                    variant.stock <= stock_threshold
+                    for variant in product.variants.all()
+                )
+            ),
+            
             "is_published": product.is_published,
         })
 
@@ -701,6 +877,9 @@ def view_products(request):
         "products": data,
     }, status=200)
 
+
+from django.db import transaction
+@transaction.atomic
 @csrf_exempt
 @require_http_methods(["POST"])
 def update_product(request, product_id):
@@ -724,21 +903,7 @@ def update_product(request, product_id):
         width = request.POST.get("width")
         height = request.POST.get("height")
 
-        # FRAMES
-        if frame_ids is not None:
-            try:
-                frame_ids = json.loads(frame_ids) if frame_ids else []
-                product.frames.set(frame_ids)
-            except json.JSONDecodeError:
-                return JsonResponse({"error": "Invalid frame_ids format"}, status=400)
-
-        # MATERIALS
-        if material_ids is not None:
-            try:
-                material_ids = json.loads(material_ids) if material_ids else []
-                product.materials.set(material_ids)
-            except json.JSONDecodeError:
-                return JsonResponse({"error": "Invalid material_ids format"}, status=400)
+       
 
         # NAME
         if name:
@@ -778,8 +943,7 @@ def update_product(request, product_id):
                 )
 
             product.supplier = supplier
-
-
+        
         # PRICE
         if price is not None:
             product.price = price
@@ -788,8 +952,10 @@ def update_product(request, product_id):
         if description is not None:
             product.description = description
 
+
+        
         # STOCK
-        if stock is not None:
+        if stock is not None and product.product_type == "fine_art":
             product.stock = stock
 
         # MAIN IMAGE
@@ -806,41 +972,6 @@ def update_product(request, product_id):
             except json.JSONDecodeError:
                 return JsonResponse({"error": "Invalid specification format"}, status=400)
 
-        # UPDATE SIZES
-        sizes = request.POST.get("sizes")
-        if sizes:
-            try:
-                sizes = json.loads(sizes)
-                product.sizes.all().delete()
-
-                for item in sizes:
-                    FineArtSize.objects.create(
-                        product=product,
-                        size=item.get("size"),
-                        price=item.get("price")
-                    )
-
-            except json.JSONDecodeError:
-                return JsonResponse({"error": "Invalid sizes format"}, status=400)
-
-        # UPDATE COLORS
-        colors = request.POST.get("colors")
-        if colors:
-            try:
-                colors = json.loads(colors)
-                product.colors.all().delete()
-
-                for index, color in enumerate(colors):
-                    color_image = request.FILES.get(f"color_image_{index}")
-
-                    ProductColor.objects.create(
-                        product=product,
-                        color_name=color.get("color_name"),
-                        image=color_image
-                    )
-
-            except json.JSONDecodeError:
-                return JsonResponse({"error": "Invalid colors format"}, status=400)
             
         is_featured = request.POST.get("is_featured")
         if is_featured is not None:
@@ -880,19 +1011,256 @@ def update_product(request, product_id):
             
         product.save()
 
-        # UPDATE GALLERY
-        gallery_images = request.FILES.getlist("images")
-        if gallery_images:
-            for img in product.gallery.all():
-                cloudinary.uploader.destroy(img.image.public_id)
+        if product.product_type == "fine_art":
 
-            product.gallery.all().delete()
+            # ------------------------
+            # FRAMES
+            # ------------------------
+            if frame_ids is not None:
+                try:
+                    frame_ids = json.loads(frame_ids) if frame_ids else []
+                    product.frames.set(frame_ids)
+                except json.JSONDecodeError:
+                    return JsonResponse(
+                        {"error": "Invalid frame_ids format"},
+                        status=400
+                    )
 
-            for img in gallery_images:
-                ProductImage.objects.create(
-                    product=product,
-                    image=img
+            # ------------------------
+            # MATERIALS
+            # ------------------------
+            if material_ids is not None:
+                try:
+                    material_ids = json.loads(material_ids) if material_ids else []
+                    product.materials.set(material_ids)
+                except json.JSONDecodeError:
+                    return JsonResponse(
+                        {"error": "Invalid material_ids format"},
+                        status=400
+                    )
+
+            # ------------------------
+            # UPDATE SIZES
+            # ------------------------
+            sizes = request.POST.get("sizes")
+
+            if sizes:
+                try:
+                    sizes = json.loads(sizes)
+
+                    product.sizes.all().delete()
+
+                    for item in sizes:
+                        FineArtSize.objects.create(
+                            product=product,
+                            size=item.get("size"),
+                            price=item.get("price")
+                        )
+
+                except json.JSONDecodeError:
+                    return JsonResponse(
+                        {"error": "Invalid sizes format"},
+                        status=400
+                    )
+
+            # ------------------------
+            # UPDATE COLORS
+            # ------------------------
+            colors = request.POST.get("colors")
+
+            if colors:
+                try:
+                    colors = json.loads(colors)
+
+                    product.colors.all().delete()
+
+                    for index, color in enumerate(colors):
+
+                        color_image = request.FILES.get(
+                            f"color_image_{index}"
+                        )
+
+                        ProductColor.objects.create(
+                            product=product,
+                            color_name=color.get("color_name"),
+                            image=color_image
+                        )
+
+                except json.JSONDecodeError:
+                    return JsonResponse(
+                        {"error": "Invalid colors format"},
+                        status=400
+                    )
+
+            # ------------------------
+            # UPDATE GALLERY
+            # ------------------------
+            gallery_images = request.FILES.getlist("images")
+
+            if gallery_images:
+
+                for img in product.gallery.all():
+                    cloudinary.uploader.destroy(
+                        img.image.public_id
+                    )
+
+                product.gallery.all().delete()
+
+                for img in gallery_images:
+                    ProductImage.objects.create(
+                        product=product,
+                        image=img
+                    )
+
+        else:
+
+            variants = request.POST.get("variants")
+
+            if not variants:
+                return JsonResponse(
+                    {"error": "Variants are required."},
+                    status=400
                 )
+
+            try:
+                variants = json.loads(variants)
+            except json.JSONDecodeError:
+                return JsonResponse(
+                    {"error": "Invalid variants format."},
+                    status=400
+                )
+
+            existing_variant_ids = set(
+                product.variants.values_list("id", flat=True)
+            )
+
+            received_variant_ids = set()
+            for index, variant in enumerate(variants):
+
+                variant_id = variant.get("id")
+                sku = variant.get("sku")
+                try:
+                    stock = int(variant.get("stock", 0))
+                except (TypeError, ValueError):
+                    return JsonResponse(
+                        {"error": "Invalid variant stock."},
+                        status=400
+                    )
+                options = variant.get("options", [])
+
+                if not sku:
+                    return JsonResponse(
+                        {"error": "Each variant must have a SKU."},
+                        status=400
+                    )
+
+                # ------------------------
+                # UPDATE EXISTING VARIANT
+                # ------------------------
+                if variant_id:
+
+                    try:
+                        product_variant = ProductVariant.objects.get(
+                            id=variant_id,
+                            product=product
+                        )
+                    except ProductVariant.DoesNotExist:
+                        return JsonResponse(
+                            {
+                                "error": f"Variant {variant_id} not found."
+                            },
+                            status=404
+                        )
+
+                    if ProductVariant.objects.exclude(
+                        id=variant_id
+                    ).filter(sku=sku).exists():
+                        return JsonResponse(
+                            {
+                                "error": f"SKU '{sku}' already exists."
+                            },
+                            status=400
+                        )
+
+                    product_variant.sku = sku
+                    product_variant.stock = stock
+                    product_variant.save()
+
+                    received_variant_ids.add(product_variant.id)
+
+                # ------------------------
+                # CREATE NEW VARIANT
+                # ------------------------
+                else:
+
+                    if ProductVariant.objects.filter(sku=sku).exists():
+                        return JsonResponse(
+                            {
+                                "error": f"SKU '{sku}' already exists."
+                            },
+                            status=400
+                        )
+
+                    product_variant = ProductVariant.objects.create(
+                        product=product,
+                        sku=sku,
+                        stock=stock
+                    )
+
+                    received_variant_ids.add(product_variant.id)
+
+                    # ------------------------
+                    # UPDATE OPTIONS
+                    # ------------------------
+                product_variant.options.all().delete()
+
+                for option in options:
+                    ProductVariantOption.objects.create(
+                            variant=product_variant,
+                            option_name=option.get("option_name"),
+                            option_value=option.get("option_value")
+                    )
+
+                # ------------------------
+                # UPDATE IMAGES
+                # ------------------------
+                variant_images = request.FILES.getlist(
+                    f"variant_images_{index}"
+                )
+
+                if variant_images:
+
+                    for img in product_variant.images.all():
+                        cloudinary.uploader.destroy(
+                            img.image.public_id
+                        )
+
+                    product_variant.images.all().delete()
+
+                    for order, img in enumerate(variant_images):
+                        ProductVariantImage.objects.create(
+                            variant=product_variant,
+                            image=img,
+                            order=order
+                        )
+            # ------------------------
+            # DELETE REMOVED VARIANTS
+            # ------------------------
+            variants_to_delete = (
+                existing_variant_ids - received_variant_ids
+            )
+
+            for variant in ProductVariant.objects.filter(
+                id__in=variants_to_delete
+            ):
+
+                for image in variant.images.all():
+                    cloudinary.uploader.destroy(
+                        image.image.public_id
+                    )
+
+                variant.delete()
+
 
         return JsonResponse({
             "message": "Product updated successfully",
@@ -904,58 +1272,103 @@ def update_product(request, product_id):
             "specification": product.specification
         })
 
-    except Product.DoesNotExist:
-        return JsonResponse({"error": "Product not found"}, status=404)
-
-    except Exception as e:
-        return JsonResponse({
-            "error": "Something went wrong",
-            "details": str(e)
-        }, status=500)
     
 
+    except Product.DoesNotExist:
+        return JsonResponse(
+            {"error": "Product not found"},
+            status=404
+        )
 
+    except Exception as e:
+        return JsonResponse(
+            {
+                "error": "Something went wrong",
+                "details": str(e)
+            },
+            status=500
+        )
+
+
+# @csrf_exempt
+# @require_http_methods(["DELETE"])
+# def delete_product(request, product_id):
+#     try:
+#         product = Product.objects.get(id=product_id)
+
+#         if product.image and getattr(product.image, "public_id", None):
+#             cloudinary.uploader.destroy(product.image.public_id)
+
+#         for img in product.gallery.all():
+#             if img.image and getattr(img.image, "public_id", None):
+#                 cloudinary.uploader.destroy(img.image.public_id)
+
+#         product.delete()
+
+#         return JsonResponse({"message": "Product deleted successfully"}, status=200)
+
+#     except Product.DoesNotExist:
+#         return JsonResponse({"error": "Product not found"}, status=404)
+    
 @csrf_exempt
 @require_http_methods(["DELETE"])
 def delete_product(request, product_id):
     try:
         product = Product.objects.get(id=product_id)
 
+        # ------------------------
+        # DELETE MAIN IMAGE
+        # ------------------------
         if product.image and getattr(product.image, "public_id", None):
             cloudinary.uploader.destroy(product.image.public_id)
 
+        # ------------------------
+        # DELETE GALLERY IMAGES
+        # ------------------------
         for img in product.gallery.all():
             if img.image and getattr(img.image, "public_id", None):
                 cloudinary.uploader.destroy(img.image.public_id)
 
+        # ------------------------
+        # DELETE COLOR IMAGES
+        # ------------------------
+        for color in product.colors.all():
+            if color.image and getattr(color.image, "public_id", None):
+                cloudinary.uploader.destroy(color.image.public_id)
+
+        # ------------------------
+        # DELETE VARIANT IMAGES
+        # ------------------------
+        for variant in product.variants.all():
+            for image in variant.images.all():
+                if image.image and getattr(image.image, "public_id", None):
+                    cloudinary.uploader.destroy(image.image.public_id)
+
+        # ------------------------
+        # DELETE PRODUCT
+        # ------------------------
         product.delete()
 
-        return JsonResponse({"message": "Product deleted successfully"}, status=200)
+        return JsonResponse(
+            {"message": "Product deleted successfully"},
+            status=200
+        )
 
     except Product.DoesNotExist:
-        return JsonResponse({"error": "Product not found"}, status=404)
-    
+        return JsonResponse(
+            {"error": "Product not found"},
+            status=404
+        )
 
-# @require_http_methods(["GET"])
-# def view_orders(request):
-#     orders = Order.objects.prefetch_related("items", "user").all()
+    except Exception as e:
+        return JsonResponse(
+            {
+                "error": "Something went wrong",
+                "details": str(e)
+            },
+            status=500
+        )
 
-#     data = []
-
-#     for order in orders:
-#         data.append({
-#             "id": order.id,
-#             "user": order.user.username if order.user else "Guest",
-#             "email": order.email,
-#             "phone": order.phone,
-#             "status": order.status,
-#             "tracking_link": order.tracking_link,
-#             "shipped_at": order.shipped_at,
-#             "total_amount": str(order.total_amount),
-#             "created_at": order.created_at,
-#         })
-
-#     return JsonResponse({"orders": data}, status=200)
 @require_http_methods(["GET"])
 def view_orders(request):
 
@@ -1304,7 +1717,7 @@ from django.db.models import Sum, Avg, Count
 from django.utils import timezone
 from datetime import timedelta
 from collections import defaultdict
-from .models import Notification, Order, OrderItem, Product, Supplier
+from .models import Notification, Order, OrderItem, Product, ProductVariant, ProductVariantImage, ProductVariantOption, Supplier
 from collections import defaultdict
 from datetime import timedelta
 from django.db.models import Sum, Avg, F
@@ -1955,14 +2368,23 @@ def add_supplier(request):
         supplier = Supplier.objects.create(
             name=data.get("name"),
             email=data.get("email"),
-            phone=data.get("phone")
+            phone=data.get("phone"),
+
+            wechat_id=data.get("wechat_id"),
+            country=data.get("country"),
+            address=data.get("address"),
+            notes=data.get("notes"),
         )
 
         return JsonResponse({
             "id": supplier.id,
             "name": supplier.name,
             "email": supplier.email,
-            "phone": supplier.phone
+            "phone": supplier.phone,
+            "wechat_id": supplier.wechat_id,
+            "country": supplier.country,
+            "address": supplier.address,
+            "notes": supplier.notes,
         }, status=201)
 
     except Exception as e:
@@ -1983,6 +2405,11 @@ def supplier_list(request):
             "name": supplier.name,
             "email": supplier.email,
             "phone": supplier.phone,
+            "phone": supplier.phone,
+            "wechat_id": supplier.wechat_id,
+            "country": supplier.country,
+            "address": supplier.address,
+            "notes": supplier.notes
         }
         for supplier in suppliers
     ]
@@ -2005,6 +2432,10 @@ def supplier_detail(request, id):
         "name": supplier.name,
         "email": supplier.email,
         "phone": supplier.phone,
+        "wechat_id": supplier.wechat_id,
+        "country": supplier.country,
+        "address": supplier.address,
+        "notes": supplier.notes,
       
     })
 
@@ -2034,6 +2465,26 @@ def update_supplier(request, id):
         supplier.phone = data.get(
             "phone",
             supplier.phone
+        )
+
+        supplier.wechat_id = data.get(
+            "wechat_id",
+            supplier.wechat_id
+        )
+
+        supplier.country = data.get(
+            "country",
+            supplier.country
+        )
+
+        supplier.address = data.get(
+            "address",
+            supplier.address
+        )
+
+        supplier.notes = data.get(
+            "notes",
+            supplier.notes
         )
 
         supplier.save()

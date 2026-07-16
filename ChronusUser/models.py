@@ -3,7 +3,7 @@ from django.db import models
 # Create your models here.
 from django.db import models
 from django.contrib.auth.models import User
-from ChronasAdmin.models import FineArtSize, Frame, Material, Product, Order
+from ChronasAdmin.models import FineArtSize, Frame, Material, Product, Order, ProductVariant
 import uuid
 
 class GuestSession(models.Model):
@@ -25,6 +25,8 @@ class CartItem(models.Model):
 
     quantity = models.IntegerField(default=1)
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    variant = models.ForeignKey(ProductVariant,on_delete=models.SET_NULL,null=True,blank=True,related_name="cart_items")
     def __str__(self):
         return f"{self.product.name} x {self.quantity}"
     
