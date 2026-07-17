@@ -516,6 +516,7 @@ def checkout(request):
 
     items = CartItem.objects.select_related(
         "product",
+        "variant",
         "size",
         "frame",
         "material"
@@ -533,6 +534,45 @@ def checkout(request):
 
     for item in items:
         total += item.quantity * item.price
+
+        # variant products
+        if item.product.product_type == "variant":
+            if not item.variant:
+                return Response(
+                    {
+                        "error":(
+                            f"variant missing for "
+                            f"{item.product.name}"
+                        )
+                    },
+                    status=400
+                )
+            if item.variant.stock < item.quantity:
+                return Response(
+                    {
+                        "error": (
+                        f"Only {item.variant.stock} "
+                        f"item(s) available for "
+                        f"{item.product.name}"
+                        )
+                    },
+                    status=400
+                )
+        # fineart
+        else:
+            if item.product.stock < item.quantity:
+                return Response(
+                    {
+                        "error": (
+                            f"Only {item.product.stock} "
+                            f"item(s) available for "
+                            f"{item.product.name}"
+                        )
+                    },
+                    status=400
+                )
+
+            
 
     guest_id = None
 
@@ -566,14 +606,7 @@ def checkout(request):
                 status=404
             )
 
-        # shipping_address = (
-        #     f"{address.full_name}, "
-        #     f"{address.address_line_1}, "
-        #     f"{address.city}, "
-        #     f"{address.state}, "
-        #     f"{address.country}, "
-        #     f"{address.postal_code}"
-        # )
+
         receiver_name = address.full_name
 
 
@@ -600,42 +633,6 @@ def checkout(request):
     # Guest checkout OR logged-in user manual address
     else:
 
-        # city = request.data.get(
-        #     "city",
-        #     ""
-        # )
-
-        # postal_code = request.data.get(
-        #     "postal_code",
-        #     ""
-        # )
-
-        # country = request.data.get(
-        #     "country",
-        #     ""
-        # )
-
-        # first_name = request.data.get(
-        #     "first_name",
-        #     ""
-        # )
-
-        # last_name = request.data.get(
-        #     "last_name",
-        #     ""
-        # )
-
-        # phone = request.data.get(
-        #     "phone",
-        #     ""
-        # )
-
-        # shipping_address = (
-        #     f"{first_name} {last_name}, "
-        #     f"{city}, "
-        #     f"{postal_code}, "
-        #     f"{country}"
-        # ).strip(", ").strip()
         receiver_name = (
             f"{request.data.get('first_name','')} "
             f"{request.data.get('last_name','')}"
@@ -679,19 +676,6 @@ def checkout(request):
                 status=400
             )
 
-    # order = Order.objects.create(
-    #     user=(
-    #         request.user
-    #         if request.user.is_authenticated
-    #         else None
-    #     ),
-    #     guest_id=guest_id,
-    #     email=request.data.get("email"),
-    #     phone=phone,
-    #     shipping_address=shipping_address,
-    #     total_amount=total,
-    #     currency=currency
-    # )
     order = Order.objects.create(
 
         user=(
@@ -732,24 +716,55 @@ def checkout(request):
         )
     )
 
-    order_items = [
+    # order_items = [
 
-        OrderItem(
-            order=order,
-            product=item.product,
-            size=item.size,
-            frame=item.frame,
-            material=item.material,
-            quantity=item.quantity,
-            price=item.price
+    #     OrderItem(
+    #         order=order,
+    #         product=item.product,
+    #         size=item.size,
+    #         frame=item.frame,
+    #         material=item.material,
+    #         quantity=item.quantity,
+    #         price=item.price
+    #     )
+
+    #     for item in items
+    # ]
+    order_items = []
+    for item in items:
+        order_items.append(
+            OrderItem(
+                order = order,
+                product = item.product,
+                variant = item.variant,
+                size=item.size,
+                frame=item.frame,
+                material=item.material,
+                quantity=item.quantity,
+                price=item.price
+
+            )
         )
-
-        for item in items
-    ]
 
     OrderItem.objects.bulk_create(
         order_items
     )
+
+    for item in items:
+        if item.product.product_type == "variant":
+
+            item.variant.stock -= item.quantity
+            item.variant.save(
+                update_fields=["stock"]
+            )
+        
+        else:
+
+            item.product.stock -= item.quantity
+            item.product.save(
+                update_fields=["stock"]
+            )
+
 
     return Response({
         "order_id": order.id,
