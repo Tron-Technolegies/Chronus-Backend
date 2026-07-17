@@ -228,6 +228,7 @@ class OrderItem(models.Model):
     size = models.ForeignKey(FineArtSize, on_delete=models.SET_NULL, null=True, blank=True)
     frame = models.ForeignKey(Frame, on_delete=models.SET_NULL, null=True, blank=True)
     material = models.ForeignKey(Material, on_delete=models.SET_NULL, null=True, blank=True)
+    variant = models.ForeignKey(ProductVariant,on_delete=models.SET_NULL,null=True,blank=True,related_name="order_items")
     def get_total_price(self):
         return self.quantity * self.price
     
