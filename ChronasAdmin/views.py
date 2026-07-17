@@ -317,6 +317,11 @@ def add_products(request):
             "variant"
         )
 
+        if product_type == "fine_art":
+            stock = int(stock) if stock else 0
+        else:
+            stock = 0
+
         if supplier_id:
             supplier = Supplier.objects.filter(id=supplier_id).first()
 
