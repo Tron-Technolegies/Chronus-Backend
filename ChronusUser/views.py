@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 import stripe
-from ChronasAdmin.models import Coupon, Notification, Product, Order, OrderItem, SubCategory
+from ChronasAdmin.models import Coupon, Notification, Product, Order, OrderItem, ProductVariant, SubCategory
 from ChronusUser.utils import apply_coupon_to_order
 from .models import GuestSession, Cart, CartItem, Wishlist, Review
 from ChronasAdmin.models import Category, Brand, Product, Order, Coupon, SubCategory
