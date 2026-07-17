@@ -1152,7 +1152,9 @@ def view_single_product(request, product_id):
             "sizes",
             "colors",
             "frames",
-            "materials"
+            "materials",
+            "variants__options",
+            "variants__images"
         ).get(id=product_id,
               is_published=True)
 
@@ -1166,6 +1168,7 @@ def view_single_product(request, product_id):
         data = {
             "id": product.id,
             "name": product.name,
+            "product_type": product.product_type,
 
             "category": {
                 "id": product.category.id,
@@ -1259,6 +1262,30 @@ def view_single_product(request, product_id):
                     
                 }
                 for m in product.materials.all()
+            ],
+
+            "variants": [
+                {
+                    "id": variant.id,
+                    "sku": variant.sku,
+                    "stock": variant.stock,
+                    "is_active": variant.is_active,
+
+                    "options": [
+                        {
+                            "option_name": option.option_name,
+                            "option_value": option.option_value,
+                        }
+                        for option in variant.options.all()
+                    ],
+
+                    "images": [
+                        image.image.url
+                        for image in variant.images.all()
+                        if image.image
+                    ]
+                }
+                for variant in product.variants.filter(is_active=True)
             ],
 
             "average_rating": round(rating_summary["avg_rating"] or 0, 1),
