@@ -1295,6 +1295,180 @@ def update_product(request, product_id):
         )
 
 
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def view_single_product(request, product_id):
+    try:
+        product = Product.objects.select_related(
+            "category",
+            "subcategory",
+            "brand",
+            "supplier"
+        ).prefetch_related(
+            "sizes",
+            "colors",
+            "gallery",
+            "frames",
+            "materials",
+            "variants__options",
+            "variants__images"
+        ).get(id=product_id)
+
+        variants = []
+
+        if product.product_type == "variant":
+            variants = [
+                {
+                    "id": variant.id,
+                    "sku": variant.sku,
+                    "stock": variant.stock,
+                    "is_active": variant.is_active,
+
+                    "options": [
+                        {
+                            "id": option.id,
+                            "option_name": option.option_name,
+                            "option_value": option.option_value,
+                        }
+                        for option in variant.options.all()
+                    ],
+
+                    "images": [
+                        {
+                            "id": image.id,
+                            "image": image.image.url,
+                            "order": image.order,
+                        }
+                        for image in variant.images.all()
+                        if image.image
+                    ],
+                }
+                for variant in product.variants.all()
+            ]
+
+        data = {
+            "id": product.id,
+            "name": product.name,
+            "product_type": product.product_type,
+
+            "category": {
+                "id": product.category.id,
+                "name": product.category.name,
+            } if product.category else None,
+
+            "subcategory": {
+                "id": product.subcategory.id,
+                "name": product.subcategory.name,
+            } if product.subcategory else None,
+
+            "brand": {
+                "id": product.brand.id,
+                "name": product.brand.name,
+            } if product.brand else None,
+
+            "supplier": {
+                "id": product.supplier.id,
+                "name": product.supplier.name,
+                "email": product.supplier.email,
+                "phone": product.supplier.phone,
+                "wechat_id": product.supplier.wechat_id,
+                "country": product.supplier.country,
+                "address": product.supplier.address,
+                "notes": product.supplier.notes,
+            } if product.supplier else None,
+
+            "price": str(product.price),
+            "supplier_cost": str(product.supplier_cost) if product.supplier_cost else None,
+
+            "description": product.description,
+            "specification": product.specification,
+
+            "stock": product.stock if product.product_type == "fine_art" else None,
+
+            "image": product.image.url if product.image else None,
+
+            "created_at": product.created_at,
+
+            "is_featured": product.is_featured,
+            "is_best_seller": product.is_best_seller,
+            "is_published": product.is_published,
+
+            "weight": str(product.weight),
+            "length": str(product.length),
+            "width": str(product.width),
+            "height": str(product.height),
+
+            "sizes": [
+                {
+                    "id": size.id,
+                    "size": size.size,
+                    "price": str(size.price),
+                }
+                for size in product.sizes.all()
+            ],
+
+            "colors": [
+                {
+                    "id": color.id,
+                    "color_name": color.color_name,
+                    "image": color.image.url if color.image else None,
+                }
+                for color in product.colors.all()
+            ],
+
+            "gallery": [
+                {
+                    "id": image.id,
+                    "image": image.image.url,
+                    "order": image.order,
+                }
+                for image in product.gallery.all()
+                if image.image
+            ],
+
+            "frames": [
+                {
+                    "id": frame.id,
+                    "name": frame.name,
+                    "image": frame.image.url if frame.image else None,
+                    "extra_price": str(frame.extra_price),
+                }
+                for frame in product.frames.all()
+            ],
+
+            "materials": [
+                {
+                    "id": material.id,
+                    "name": material.name,
+                    "description": material.description,
+                    "extra_price": str(material.extra_price),
+                }
+                for material in product.materials.all()
+            ],
+
+            "variants": variants,
+        }
+
+        return JsonResponse(data, status=200)
+
+    except Product.DoesNotExist:
+        return JsonResponse(
+            {"error": "Product not found"},
+            status=404
+        )
+
+    except Exception as e:
+        return JsonResponse(
+            {
+                "error": "Something went wrong",
+                "details": str(e)
+            },
+            status=500
+        )
+    
+
+    
 # @csrf_exempt
 # @require_http_methods(["DELETE"])
 # def delete_product(request, product_id):

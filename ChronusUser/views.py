@@ -2823,3 +2823,42 @@ def delete_address(request, address_id):
     return Response({
         "message": "Address deleted"
     })
+
+
+from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import permission_classes
+from rest_framework.permissions import IsAuthenticated
+from django.http import JsonResponse
+import json
+
+ 
+@csrf_exempt
+@require_http_methods(["PUT"])
+@permission_classes([IsAuthenticated])
+def update_profile(request):
+    try:
+        data = json.loads(request.body)
+
+        user = request.user
+
+        user.first_name = data.get("first_name", user.first_name)
+        user.last_name = data.get("last_name", user.last_name)
+        user.email = data.get("email", user.email)
+
+        # If phone_number exists in your User model
+        if hasattr(user, "phone_number"):
+            user.phone_number = data.get("phone_number", user.phone_number)
+
+        user.save()
+
+        return JsonResponse({
+            "success": True,
+            "message": "Profile updated successfully."
+        }, status=200)
+
+    except Exception as e:
+        return JsonResponse({
+            "success": False,
+            "message": str(e)
+        }, status=400)

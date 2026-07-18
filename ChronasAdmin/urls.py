@@ -63,6 +63,8 @@ urlpatterns = [
 
     path("orders/<int:order_id>/create-shipment/",views.create_shipment,name="create_shipment"),
 
+    path("products/<int:product_id>/",views.view_single_product,name="view_single_product"),
+
 
 
 ]
