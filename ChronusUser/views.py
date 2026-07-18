@@ -2825,40 +2825,26 @@ def delete_address(request, address_id):
     })
 
 
-from django.views.decorators.http import require_http_methods
-from django.views.decorators.csrf import csrf_exempt
-from rest_framework.decorators import permission_classes
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
-from django.http import JsonResponse
-import json
+from rest_framework.response import Response
+from django.contrib.auth import get_user_model
 
- 
-@csrf_exempt
-@require_http_methods(["PUT"])
+User = get_user_model()
+
+@api_view(["PUT"])
 @permission_classes([IsAuthenticated])
 def update_profile(request):
-    try:
-        data = json.loads(request.body)
 
-        user = request.user
+    user = request.user
 
-        user.first_name = data.get("first_name", user.first_name)
-        user.last_name = data.get("last_name", user.last_name)
-        user.email = data.get("email", user.email)
+    user.first_name = request.data.get("first_name", user.first_name)
+    user.last_name = request.data.get("last_name", user.last_name)
+    user.email = request.data.get("email", user.email)
 
-        # If phone_number exists in your User model
-        if hasattr(user, "phone_number"):
-            user.phone_number = data.get("phone_number", user.phone_number)
+    user.save()
 
-        user.save()
-
-        return JsonResponse({
-            "success": True,
-            "message": "Profile updated successfully."
-        }, status=200)
-
-    except Exception as e:
-        return JsonResponse({
-            "success": False,
-            "message": str(e)
-        }, status=400)
+    return Response({
+        "success": True,
+        "message": "Profile updated successfully."
+    })
