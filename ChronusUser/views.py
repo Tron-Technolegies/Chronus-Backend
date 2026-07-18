@@ -2848,3 +2848,24 @@ def update_profile(request):
         "success": True,
         "message": "Profile updated successfully."
     })
+
+
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def view_profile(request):
+    user = request.user
+
+    return Response({
+        "id": user.id,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "email": user.email,
+        "phone_number": getattr(user, "phone_number", None),
+        "full_name": f"{user.first_name} {user.last_name}".strip(),
+    })
