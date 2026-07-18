@@ -65,7 +65,7 @@ urlpatterns = [
 
     path("products/<int:product_id>/",views.view_single_product,name="view_single_product"),
 
-    path("profile/", views.view_profile, name="view_profile"),
+ 
 
 
 
