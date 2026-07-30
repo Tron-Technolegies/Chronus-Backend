@@ -2477,36 +2477,61 @@ def list_materials(request):
 
     return JsonResponse(data, safe=False)
 
-@csrf_exempt
-@require_http_methods(["POST"])
-def update_material(request, material_id):
 
+from rest_framework.decorators import api_view, parser_classes
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.response import Response
+from rest_framework import status
+
+@api_view(["PUT"])
+@parser_classes([MultiPartParser, FormParser])
+def update_material(request, material_id):
     try:
         material = Material.objects.get(id=material_id)
 
-        name = request.POST.get("name")
-        description = request.POST.get("description")
-        extra_price = request.POST.get("extra_price")
-
-        if name:
-            material.name = name
-
-        if description:
-            material.description = description
-
-        if extra_price:
-            material.extra_price = extra_price
+        material.name = request.data.get("name", material.name)
+        material.description = request.data.get("description", material.description)
+        material.extra_price = request.data.get("extra_price", material.extra_price)
 
         material.save()
 
-        return JsonResponse({
-            "message": "Material updated successfully"
-        })
+        return Response({"message": "Material updated successfully"})
 
     except Material.DoesNotExist:
-        return JsonResponse({
-            "error": "Material not found"
-        }, status=404)
+        return Response(
+            {"error": "Material not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+# @csrf_exempt
+# @require_http_methods(["POST"])
+# def update_material(request, material_id):
+
+#     try:
+#         material = Material.objects.get(id=material_id)
+
+#         name = request.POST.get("name")
+#         description = request.POST.get("description")
+#         extra_price = request.POST.get("extra_price")
+
+#         if name:
+#             material.name = name
+
+#         if description:
+#             material.description = description
+
+#         if extra_price:
+#             material.extra_price = extra_price
+
+#         material.save()
+
+#         return JsonResponse({
+#             "message": "Material updated successfully"
+#         })
+
+#     except Material.DoesNotExist:
+#         return JsonResponse({
+#             "error": "Material not found"
+#         }, status=404)
     
 @csrf_exempt
 @require_http_methods(["DELETE"])
