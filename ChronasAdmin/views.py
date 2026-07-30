@@ -2477,50 +2477,25 @@ def list_materials(request):
 
     return JsonResponse(data, safe=False)
 
-# @csrf_exempt
-# @require_http_methods(["PUT"])
-# def update_material(request, material_id):
-
-#     try:
-#         material = Material.objects.get(id=material_id)
-
-#         name = request.POST.get("name")
-#         description = request.POST.get("description")
-#         extra_price = request.POST.get("extra_price")
-
-#         if name:
-#             material.name = name
-
-#         if description:
-#             material.description = description
-
-#         if extra_price:
-#             material.extra_price = extra_price
-
-#         material.save()
-
-#         return JsonResponse({
-#             "message": "Material updated successfully"
-#         })
-
-#     except Material.DoesNotExist:
-#         return JsonResponse({
-#             "error": "Material not found"
-#         }, status=404)
-    
-import json
-
 @csrf_exempt
-@require_http_methods(["PUT"])
+@require_http_methods(["POST"])
 def update_material(request, material_id):
+
     try:
         material = Material.objects.get(id=material_id)
 
-        data = json.loads(request.body)
+        name = request.POST.get("name")
+        description = request.POST.get("description")
+        extra_price = request.POST.get("extra_price")
 
-        material.name = data.get("name", material.name)
-        material.description = data.get("description", material.description)
-        material.extra_price = data.get("extra_price", material.extra_price)
+        if name:
+            material.name = name
+
+        if description:
+            material.description = description
+
+        if extra_price:
+            material.extra_price = extra_price
 
         material.save()
 
@@ -2529,10 +2504,9 @@ def update_material(request, material_id):
         })
 
     except Material.DoesNotExist:
-        return JsonResponse({"error": "Material not found"}, status=404)
-
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
+        return JsonResponse({
+            "error": "Material not found"
+        }, status=404)
     
 @csrf_exempt
 @require_http_methods(["DELETE"])
