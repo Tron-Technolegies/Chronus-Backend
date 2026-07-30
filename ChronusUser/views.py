@@ -2494,6 +2494,11 @@ class CreateTabbyPayment(APIView):
                 )
 
 
+            
+
+            # FIXED CHECKOUT URL EXTRACTION
+
+            # payment_url = None
             if response.status_code not in [200, 201]:
 
                 return Response(
@@ -2503,6 +2508,14 @@ class CreateTabbyPayment(APIView):
                     status=response.status_code
                 )
 
+           
+            # Save Tabby payment ID
+            payment_id = data.get("id")
+
+            if payment_id:
+                order.payment_id = payment_id
+                order.save(update_fields=["payment_id"])
+                print("TABBY PAYMENT ID:", payment_id, flush=True)
 
             # FIXED CHECKOUT URL EXTRACTION
 

@@ -2232,7 +2232,6 @@ import json
 
 @csrf_exempt
 @require_http_methods(["PUT", "PATCH"])
-@staff_member_required
 def update_subcategory(request, pk):
     sub = get_object_or_404(SubCategory, pk=pk)
 
@@ -2261,7 +2260,6 @@ from django.views.decorators.http import require_http_methods
 
 @csrf_exempt
 @require_http_methods(["DELETE"])
-@staff_member_required
 def delete_subcategory(request, pk):
     sub = get_object_or_404(SubCategory, pk=pk)
     sub.delete()
