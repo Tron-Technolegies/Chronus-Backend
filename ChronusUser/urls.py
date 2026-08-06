@@ -33,6 +33,8 @@ urlpatterns = [
     path('view_coupons/', views.view_coupons, name='view_coupons'),
     path("subcategories/", views.list_subcategories, name='subcategories'),
     path("payments/ziina/create/", views.CreateZiinaPayment.as_view(), name='ziina-payment-intent'),
+    path("payments/ziina/webhook/",views.ZiinaWebhook.as_view(),name="ziina-webhook"),
+    
     path("calculate-price/", views.calculate_price, name="calculate_price"),
 
 

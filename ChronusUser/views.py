@@ -1665,7 +1665,6 @@ class CreateZiinaPayment(APIView):
 
             data = response.json()
 
-
             if response.status_code not in [200, 201]:
 
                 return Response(
@@ -1675,12 +1674,29 @@ class CreateZiinaPayment(APIView):
                     status=response.status_code
                 )
 
+            payment_id = data.get("id")
+            if not payment_id:
+
+                return Response(
+                    {
+                        "error": "Ziina did not return a payment ID."
+                    },
+                    status=500
+                )
+                
+            print("ZIINA PAYMENT ID:", payment_id, flush=True)
+            
+            
+            order.payment_id = payment_id
+            order.save(update_fields=["payment_id"])
+
 
             return Response(
                 {
                     "payment_url": data.get(
                         "redirect_url"
-                    )
+                    ),
+                    "payment_id": payment_id
                 }
             )
 
@@ -1728,83 +1744,256 @@ class CreateZiinaPayment(APIView):
             )
 
 
+import hashlib
+import hmac
+import logging
 
-# class CreateZiinaPayment(APIView):
+from django.conf import settings
+from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+
+from ChronasAdmin.models import Notification
+from .models import Order
+import hashlib
+import hmac
+
+from django.conf import settings
+from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+
+from ChronusUser.models import Order
+from ChronasAdmin.models import Notification
+
+
+class ZiinaWebhook(APIView):
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def verify_signature(self, request):
+
+        signature = request.headers.get("X-Hmac-Signature")
+
+        if not signature:
+            print("Ziina signature missing", flush=True)
+            return False
+
+        expected_signature = hmac.new(
+            settings.ZIINA_WEBHOOK_SECRET.encode(),
+            request.body,
+            hashlib.sha256
+        ).hexdigest()
+
+        return hmac.compare_digest(signature, expected_signature)
+
+    def post(self, request):
+
+        print("========== ZIINA WEBHOOK ==========", flush=True)
+        print("REQUEST:", request.data, flush=True)
+
+        # Always verify signature in production
+        if not self.verify_signature(request):
+            return Response(
+                {
+                    "error": "Invalid signature"
+                },
+                status=401
+            )
+
+        event = request.data.get("event")
+
+        # Ignore other webhook events
+        if event != "payment_intent.status.updated":
+            return Response(
+                {
+                    "success": True,
+                    "message": "Ignored event"
+                },
+                status=200
+            )
+
+        payment = request.data.get("data", {})
+
+        payment_id = payment.get("id")
+        payment_status = payment.get("status")
+
+        print("Payment ID:", payment_id, flush=True)
+        print("Payment Status:", payment_status, flush=True)
+
+        order = Order.objects.filter(
+            payment_id=payment_id
+        ).first()
+
+        if not order:
+            return Response(
+                {
+                    "error": "Order not found"
+                },
+                status=404
+            )
+
+        # Prevent duplicate processing
+        if payment_status == "completed":
+
+            if order.payment_status != "paid":
+
+                order.payment_status = "paid"
+                order.save(update_fields=["payment_status"])
+
+                Notification.objects.create(
+                    title="Payment Received",
+                    message=f"Ziina payment received for Order #{order.id}"
+                )
+
+                print(f"Order {order.id} marked as PAID", flush=True)
+
+        elif payment_status == "failed":
+
+            if order.payment_status != "failed":
+
+                order.payment_status = "failed"
+                order.save(update_fields=["payment_status"])
+
+                print(f"Order {order.id} marked as FAILED", flush=True)
+
+        elif payment_status == "pending":
+
+            if order.payment_status != "pending":
+
+                order.payment_status = "pending"
+                order.save(update_fields=["payment_status"])
+
+                print(f"Order {order.id} marked as PENDING", flush=True)
+
+        elif payment_status == "requires_user_action":
+
+            print("Customer action required", flush=True)
+
+        elif payment_status == "requires_payment_instrument":
+
+            print("Waiting for payment instrument", flush=True)
+
+        return Response(
+            {
+                "success": True
+            },
+            status=200
+        )
+# LOCAL TESTING FUNCTION BY SKIPPING SIGNATURE VERIFICATION
+
+# class ZiinaWebhook(APIView):
+
 #     permission_classes = [AllowAny]
+#     authentication_classes = []
+
+#     def verify_signature(self, request):
+
+#         signature = request.headers.get("X-Hmac-Signature")
+
+#         if not signature:
+#             print("Signature Missing", flush=True)
+#             return False
+
+#         expected_signature = hmac.new(
+#             settings.ZIINA_WEBHOOK_SECRET.encode(),
+#             request.body,
+#             hashlib.sha256
+#         ).hexdigest()
+
+#         return hmac.compare_digest(signature, expected_signature)
 
 #     def post(self, request):
-#         try:
-#             order_id = request.data.get("order_id")
 
-#             if not order_id:
-#                 return Response({"error": "order_id required"}, status=400)
+#         print("========== ZIINA WEBHOOK ==========", flush=True)
+#         print("REQUEST:", request.data, flush=True)
 
-#             order = Order.objects.get(id=order_id)
-
-#             # same security logic you used
-#             if request.user.is_authenticated:
-#                 if order.user != request.user:
-#                     return Response({"error": "Unauthorized order access"}, status=403)
-
-#             else:
-#                 guest_id = request.headers.get("X-Guest-Id")
-
-#                 if not guest_id or order.guest_id != guest_id:
-#                     return Response({"error": "Unauthorized guest order"}, status=403)
-
-#             url = "https://api-v2.ziina.com/api/payment_intent"
-
-#             headers = {
-#                 "Authorization": f"Bearer {settings.ZIINA_API_KEY}",
-#                 "Content-Type": "application/json"
-#             }
-#             currency = order.currency.upper()
-#             if currency != "AED":
+#         # Skip signature verification in DEBUG mode
+#         if settings.DEBUG:
+#             print("DEBUG MODE - Signature verification skipped", flush=True)
+#         else:
+#             if not self.verify_signature(request):
 #                 return Response(
 #                     {
-#                         "error": "Ziina currently supports AED payments only"
+#                         "error": "Invalid signature"
 #                     },
-#                     status=400
-#                 )
-#             payload = {
-#                 "amount": convert_amount(
-#                     order.total_amount,
-#                     currency
-#                 ),
-
-#                 "currency_code": currency,
-
-#                 "message": f"Order {order.id}",
-
-#                 "metadata": {
-#                     "order_id": str(order.id)
-#                 }
-#             }
-
-#             response = requests.post(url, json=payload, headers=headers)
-
-#             data = response.json()
-
-#             if response.status_code not in [200, 201]:
-#                 return Response(
-#                     {
-#                         "error": data
-#                     },
-#                     status=response.status_code
+#                     status=401
 #                 )
 
-#             return Response({
-#                 "payment_url": data.get("redirect_url")
-#             })
+#         event = request.data.get("event")
 
-#         except Order.DoesNotExist:
-#             return Response({"error": "Invalid order"}, status=404)
+#         if event != "payment_intent.status.updated":
+#             return Response(
+#                 {
+#                     "success": True,
+#                     "message": "Ignored event"
+#                 },
+#                 status=200
+#             )
 
-#         except Exception as e:
-#             return Response({"error": str(e)}, status=500)
-        
+#         payment = request.data.get("data", {})
 
+#         payment_id = payment.get("id")
+#         payment_status = payment.get("status")
 
+#         print("Payment ID:", payment_id, flush=True)
+#         print("Payment Status:", payment_status, flush=True)
+
+#         order = Order.objects.filter(
+#             payment_id=payment_id
+#         ).first()
+
+#         if not order:
+#             return Response(
+#                 {
+#                     "error": "Order not found"
+#                 },
+#                 status=404
+#             )
+
+#         if payment_status == "completed":
+
+#             if order.payment_status != "paid":
+
+#                 order.payment_status = "paid"
+#                 order.save(update_fields=["payment_status"])
+
+#                 Notification.objects.create(
+#                     title="Payment Received",
+#                     message=f"Ziina payment received for Order #{order.id}"
+#                 )
+
+#                 print("Order marked as PAID", flush=True)
+
+#         elif payment_status == "failed":
+
+#             order.payment_status = "failed"
+#             order.save(update_fields=["payment_status"])
+
+#             print("Order marked as FAILED", flush=True)
+
+#         elif payment_status == "pending":
+
+#             order.payment_status = "pending"
+#             order.save(update_fields=["payment_status"])
+
+#             print("Order marked as PENDING", flush=True)
+
+#         elif payment_status == "requires_payment_instrument":
+
+#             print("Waiting for payment method...", flush=True)
+
+#         elif payment_status == "requires_user_action":
+
+#             print("Waiting for customer action...", flush=True)
+
+#         return Response(
+#             {
+#                 "success": True
+#             },
+#             status=200
+#         )
 # user/views.py
 
 from django.http import JsonResponse
