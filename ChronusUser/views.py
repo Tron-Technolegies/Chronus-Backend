@@ -837,10 +837,10 @@ def checkout(request):
                 update_fields=["stock"]
             )
 
-
+    converted_total = convert_price(total, currency)
     return Response({
         "order_id": order.id,
-        "amount": total,
+        "amount": converted_total,
         "currency": currency,
         "display_amount": convert_price(total, currency)
     })
