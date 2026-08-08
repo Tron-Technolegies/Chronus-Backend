@@ -8,7 +8,7 @@ def update_exchange_rates():
 
     url = (
         f"https://v6.exchangerate-api.com/v6/"
-        f"{settings.EXCHANGE_RATE_API_KEY}/latest/USD"
+        f"{settings.EXCHANGE_RATE_API_KEY}/latest/AED"
     )
 
     response = requests.get(url)
@@ -39,7 +39,7 @@ def get_rate(currency):
 
     currency = currency.upper()
 
-    if currency == "USD":
+    if currency == "AED":
         return 1
 
     exchange_rate = ExchangeRate.objects.filter(

@@ -17,7 +17,8 @@ urlpatterns = [
 
     # -------- Reviews --------
     path('review/add/', views.add_review, name='add_review'),
-
+    path("review/edit/<int:review_id>/",views.edit_review,name="edit_review"),
+    path("review/delete/<int:review_id>/",views.delete_review,name="delete_review"),
     # -------- Checkout & Orders --------
     path('checkout/', views.checkout, name='checkout'),
     path('orders/', views.my_orders, name='my_orders'),

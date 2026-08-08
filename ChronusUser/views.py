@@ -190,7 +190,7 @@ from ChronusUser.currency import convert_price
 def view_cart(request):
     currency = request.GET.get(
         "currency",
-        "USD"
+        "AED"
     ).upper()
 
     cart = get_cart(request)
@@ -492,24 +492,96 @@ def add_review(request):
     if rating < 1 or rating > 5:
         return Response({"error": "Rating must be between 1 and 5"}, status=400)
 
+    if request.user.is_authenticated:
+        review_name = (
+            request.user.get_full_name()
+            or request.user.username
+        )
+    else:
+        review_name = request.data.get("name", "Guest")
     Review.objects.create(
         product_id=product_id,
         user=request.user if request.user.is_authenticated else None,
-        name=request.data.get("name", "Guest"),
+        name=review_name,
         rating=rating,
         comment=comment
     )
 
     return Response({"message": "Review added"})
 
+@api_view(["PUT"])
+@permission_classes([IsAuthenticated])
+def edit_review(request, review_id):
+    try:
+        review = Review.objects.get(id=review_id)
 
+        if review.user != request.user:
+            return Response(
+                {"error": "You can only edit your own review."},
+                status=403
+            )
+
+        rating = request.data.get("rating")
+        comment = request.data.get("comment")
+
+        if rating is not None:
+            rating = int(rating)
+
+            if rating < 1 or rating > 5:
+                return Response(
+                    {"error": "Rating must be between 1 and 5"},
+                    status=400
+                )
+
+            review.rating = rating
+
+        if comment is not None:
+            review.comment = comment
+
+        review.save()
+
+        return Response({
+            "message": "Review updated successfully."
+        })
+
+    except Review.DoesNotExist:
+        return Response(
+            {"error": "Review not found"},
+            status=404
+        )
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_review(request, review_id):
+    try:
+        review = Review.objects.get(id=review_id)
+
+        if review.user != request.user:
+            return Response(
+                {"error": "You can only delete your own review."},
+                status=403
+            )
+
+        review.delete()
+
+        return Response({
+            "message": "Review deleted successfully."
+        })
+
+    except Review.DoesNotExist:
+        return Response(
+            {"error": "Review not found"},
+            status=404
+        )
+
+    
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def checkout(request):
 
     currency = request.data.get(
         "currency",
-        "USD"
+        "AED"
     ).upper()
 
     cart = get_cart(request)
@@ -769,7 +841,8 @@ def checkout(request):
     return Response({
         "order_id": order.id,
         "amount": total,
-        "currency": currency
+        "currency": currency,
+        "display_amount": convert_price(total, currency)
     })
 
 
@@ -810,7 +883,7 @@ def my_orders(request):
             "total_amount": convert_price(
                 order.total_amount,
                 order.currency
-            ),
+                ),
             "currency": order.currency,
             "created_at": order.created_at,
 
@@ -820,7 +893,18 @@ def my_orders(request):
             "shipment_id": order.shipment_id,
             "shipped_at": order.shipped_at,
 
-            "items": items
+            "items": items,
+
+            # Shipping Details
+            "receiver_name": order.receiver_name,
+            "phone": order.phone,
+            "address_line_1": order.address_line_1,
+            "address_line_2": order.address_line_2,
+            "city": order.city,
+            "state": order.state,
+            "country": order.country,
+            "postal_code": order.postal_code,
+            "shipping_address": order.shipping_address
         })
 
     return Response({"orders": data})
@@ -975,7 +1059,7 @@ def view_products(request):
     min_price = request.GET.get("min_price")
     max_price = request.GET.get("max_price")
 
-    currency = request.GET.get("currency", "USD").upper()   #newwww
+    currency = request.GET.get("currency", "AED").upper()   #newwww
 
     try:
         page = int(request.GET.get("page", 1))
@@ -1143,7 +1227,7 @@ def view_single_product(request, product_id):
     try:
         currency = request.GET.get(
             "currency",
-            "USD"
+            "AED"
         ).upper()
         product = Product.objects.select_related(
             "category", "subcategory", "brand"
@@ -2008,7 +2092,7 @@ def calculate_price(request):
 
     currency = request.GET.get(
         "currency",
-        "USD"
+        "AED"
     ).upper()
 
     size = FineArtSize.objects.get(id=size_id)
