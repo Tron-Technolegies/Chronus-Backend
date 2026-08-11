@@ -41,6 +41,7 @@ urlpatterns = [
 
     path("track-order/<int:order_id>/", views.track_order, name='track_order'),
     path("payments/tabby/",views.CreateTabbyPayment.as_view(),name="tabby-payment"),
+     path("tabby/webhook/",views.TabbyWebhook.as_view(),name="tabby-webhook"),
     path("forgot-password/",views.forgot_password, name='forgot_password'),
     path("reset-password/",views.reset_password, name='reset_password'),
 

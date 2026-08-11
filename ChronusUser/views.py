@@ -2782,13 +2782,37 @@ class CreateTabbyPayment(APIView):
                 )
 
            
-            # Save Tabby payment ID
-            payment_id = data.get("id")
+            # # Save Tabby payment ID
+            # payment_id = data.get("id")
 
-            if payment_id:
-                order.payment_id = payment_id
-                order.save(update_fields=["payment_id"])
-                print("TABBY PAYMENT ID:", payment_id, flush=True)
+            # if payment_id:
+            #     order.payment_id = payment_id
+            #     order.save(update_fields=["payment_id"])
+            #     print("TABBY PAYMENT ID:", payment_id, flush=True)
+
+            tabby_payment_id = (data.get("payment", {}).get("id"))
+            if not tabby_payment_id:
+                print(
+                    "TABBY PAYMENT ID NOT FOUND IN RESPONSE",
+                    flush=True
+                )
+                return Response(
+                    {
+                        "error": "Tabby payment ID not found",
+                        "response": data
+                    },
+                    status=500
+                )
+            order.payment_id = tabby_payment_id
+            order.save(update_fields=["payment_id"])
+            print(
+                    "TABBY PAYMENT ID:",
+                    tabby_payment_id,
+                    flush=True
+                )
+            
+
+
 
             # FIXED CHECKOUT URL EXTRACTION
 
@@ -2840,14 +2864,8 @@ class CreateTabbyPayment(APIView):
 
             return Response(
                 {
-
-                    "payment_id": data.get(
-                        "id"
-                    ),
-
-
+                    "payment_id": tabby_payment_id,
                     "payment_url": payment_url
-
                 }
             )
 
@@ -2889,11 +2907,636 @@ class CreateTabbyPayment(APIView):
             )
 
 
+def capture_tabby_payment(order):
+    """
+    Capture an authorized Tabby payment.
+    Returns (success, response_data).
+    """
+
+    if not order.payment_id:
+        return False, {
+            "error": "Order does not have a Tabby payment ID"
+        }
+
+    capture_url = (
+        f"https://api.tabby.ai/api/v2/payments/"
+        f"{order.payment_id}/captures"
+    )
+
+    headers = {
+        "Authorization": f"Bearer {settings.TABBY_SECRET_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "amount": str(order.total_amount),
+        "reference_id": f"order-{order.id}-capture",
+        "tax_amount": "0.00",
+        "shipping_amount": "0.00",
+        "discount_amount": "0.00",
+    }
+
+    print(
+        "========== TABBY CAPTURE ==========",
+        flush=True
+    )
+
+    print(
+        "CAPTURE URL:",
+        capture_url,
+        flush=True
+    )
+
+    print(
+        "CAPTURE PAYLOAD:",
+        payload,
+        flush=True
+    )
+
+    response = requests.post(
+        capture_url,
+        json=payload,
+        headers=headers,
+        timeout=30
+    )
+
+    print(
+        "TABBY CAPTURE STATUS:",
+        response.status_code,
+        flush=True
+    )
+
+    print(
+        "TABBY CAPTURE RESPONSE:",
+        response.text,
+        flush=True
+    )
+
+    try:
+        data = response.json()
+    except Exception:
+        data = {
+            "raw_response": response.text
+        }
+
+    if response.status_code not in [200, 201]:
+        return False, data
+
+    return True, data
+
+
+from .models import Order
+from django.conf import settings
+from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+import requests
+import traceback
+
+
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes
 from django.core.mail import send_mail
 from django.contrib.auth.models import User
+
+class TabbyWebhook(APIView):
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+
+        print(
+            "========== TABBY WEBHOOK ==========",
+            flush=True
+        )
+
+        try:
+
+            # ==================================================
+            # 1. Verify webhook secret
+            # ==================================================
+
+            received_secret = request.headers.get(
+                "X-Tabby-Webhook-Secret"
+            )
+
+            if received_secret != settings.TABBY_WEBHOOK_SECRET:
+
+                print(
+                    "INVALID TABBY WEBHOOK SECRET",
+                    flush=True
+                )
+
+                return Response(
+                    {
+                        "error": "Unauthorized"
+                    },
+                    status=401
+                )
+
+            print(
+                "WEBHOOK SECRET VERIFIED",
+                flush=True
+            )
+
+
+            # ==================================================
+            # 2. Get webhook payload
+            # ==================================================
+
+            data = request.data
+
+            print(
+                "TABBY WEBHOOK DATA:",
+                data,
+                flush=True
+            )
+
+            payment_id = data.get("id")
+
+            webhook_status = data.get("status")
+
+
+            if not payment_id:
+
+                print(
+                    "TABBY PAYMENT ID MISSING",
+                    flush=True
+                )
+
+                return Response(
+                    {
+                        "error": "payment id missing"
+                    },
+                    status=400
+                )
+
+
+            print(
+                "TABBY PAYMENT ID:",
+                payment_id,
+                flush=True
+            )
+
+            print(
+                "TABBY WEBHOOK STATUS:",
+                webhook_status,
+                flush=True
+            )
+
+
+            # ==================================================
+            # 3. Find Order
+            # ==================================================
+
+            order = Order.objects.filter(
+                payment_id=payment_id
+            ).first()
+
+
+            if not order:
+
+                print(
+                    "ORDER NOT FOUND FOR PAYMENT:",
+                    payment_id,
+                    flush=True
+                )
+
+                # Return 200 so Tabby does not repeatedly
+                # retry a payment that doesn't exist locally.
+
+                return Response(
+                    {
+                        "status": "ignored"
+                    },
+                    status=200
+                )
+
+
+            print(
+                "ORDER FOUND:",
+                order.id,
+                flush=True
+            )
+
+            print(
+                "CURRENT PAYMENT STATUS:",
+                order.payment_status,
+                flush=True
+            )
+
+            print(
+                "CURRENT ORDER STATUS:",
+                order.status,
+                flush=True
+            )
+
+
+            # ==================================================
+            # 4. Retrieve payment directly from Tabby
+            # ==================================================
+
+            verify_url = (
+                f"https://api.tabby.ai/api/v2/payments/"
+                f"{payment_id}"
+            )
+
+            headers = {
+                "Authorization":
+                    f"Bearer {settings.TABBY_SECRET_KEY}",
+
+                "Content-Type":
+                    "application/json"
+            }
+
+
+            verify_response = requests.get(
+                verify_url,
+                headers=headers,
+                timeout=20
+            )
+
+
+            print(
+                "TABBY VERIFY STATUS:",
+                verify_response.status_code,
+                flush=True
+            )
+
+            print(
+                "TABBY VERIFY RESPONSE:",
+                verify_response.text,
+                flush=True
+            )
+
+
+            if verify_response.status_code != 200:
+
+                print(
+                    "TABBY PAYMENT VERIFICATION FAILED",
+                    flush=True
+                )
+
+                return Response(
+                    {
+                        "error":
+                            "Unable to verify Tabby payment"
+                    },
+                    status=500
+                )
+
+
+            payment_data = verify_response.json()
+
+
+            # ==================================================
+            # 5. Get verified payment status
+            # ==================================================
+
+            payment_status = (
+                payment_data
+                .get("status", "")
+                .upper()
+            )
+
+
+            print(
+                "VERIFIED TABBY PAYMENT STATUS:",
+                payment_status,
+                flush=True
+            )
+
+
+            # ==================================================
+            # 6. Payment already CLOSED
+            # ==================================================
+
+            if payment_status == "CLOSED":
+
+                print(
+                    "TABBY PAYMENT IS CLOSED",
+                    flush=True
+                )
+
+
+                # Idempotency:
+                # Don't process the same successful payment twice.
+
+                if order.payment_status == "paid":
+
+                    print(
+                        "ORDER ALREADY MARKED AS PAID:",
+                        order.id,
+                        flush=True
+                    )
+
+                    return Response(
+                        {
+                            "status": "already_processed"
+                        },
+                        status=200
+                    )
+
+
+                order.payment_status = "paid"
+
+                order.status = "processing"
+
+
+                order.save(
+                    update_fields=[
+                        "payment_status",
+                        "status"
+                    ]
+                )
+
+
+                print(
+                    "ORDER PAYMENT MARKED AS PAID:",
+                    order.id,
+                    flush=True
+                )
+
+                print(
+                    "ORDER STATUS:",
+                    order.status,
+                    flush=True
+                )
+
+
+            # ==================================================
+            # 7. Payment AUTHORIZED
+            # ==================================================
+
+            elif payment_status == "AUTHORIZED":
+
+                print(
+                    "TABBY PAYMENT AUTHORIZED:",
+                    order.id,
+                    flush=True
+                )
+
+
+                # ----------------------------------------------
+                # Capture payment
+                # ----------------------------------------------
+
+                capture_success, capture_data = (
+                    capture_tabby_payment(order)
+                )
+
+
+                if not capture_success:
+
+                    print(
+                        "TABBY CAPTURE FAILED:",
+                        capture_data,
+                        flush=True
+                    )
+
+                    return Response(
+                        {
+                            "error":
+                                "Tabby capture failed",
+
+                            "details":
+                                capture_data
+                        },
+                        status=500
+                    )
+
+
+                print(
+                    "TABBY CAPTURE SUCCESSFUL:",
+                    capture_data,
+                    flush=True
+                )
+
+
+                # ----------------------------------------------
+                # Verify payment again after capture
+                # ----------------------------------------------
+
+                verify_url = (
+                    f"https://api.tabby.ai/api/v2/payments/"
+                    f"{order.payment_id}"
+                )
+
+
+                verify_response = requests.get(
+                    verify_url,
+                    headers=headers,
+                    timeout=20
+                )
+
+
+                print(
+                    "TABBY POST-CAPTURE VERIFY:",
+                    verify_response.status_code,
+                    flush=True
+                )
+
+                print(
+                    "TABBY POST-CAPTURE RESPONSE:",
+                    verify_response.text,
+                    flush=True
+                )
+
+
+                if verify_response.status_code != 200:
+
+                    return Response(
+                        {
+                            "error":
+                                "Unable to verify payment "
+                                "after capture"
+                        },
+                        status=500
+                    )
+
+
+                updated_payment = (
+                    verify_response.json()
+                )
+
+
+                updated_status = (
+                    updated_payment
+                    .get("status", "")
+                    .upper()
+                )
+
+
+                print(
+                    "TABBY STATUS AFTER CAPTURE:",
+                    updated_status,
+                    flush=True
+                )
+
+
+                # ----------------------------------------------
+                # Payment successfully captured
+                # ----------------------------------------------
+
+                if updated_status == "CLOSED":
+
+                    if order.payment_status != "paid":
+
+                        order.payment_status = "paid"
+
+                        order.status = "processing"
+
+
+                        order.save(
+                            update_fields=[
+                                "payment_status",
+                                "status"
+                            ]
+                        )
+
+
+                        print(
+                            "ORDER MARKED AS PAID:",
+                            order.id,
+                            flush=True
+                        )
+
+                    else:
+
+                        print(
+                            "ORDER WAS ALREADY PAID:",
+                            order.id,
+                            flush=True
+                        )
+
+
+                else:
+
+                    print(
+                        "PAYMENT NOT CLOSED AFTER CAPTURE:",
+                        updated_status,
+                        flush=True
+                    )
+
+                    return Response(
+                        {
+                            "status":
+                                "capture_pending",
+
+                            "payment_status":
+                                updated_status
+                        },
+                        status=200
+                    )
+
+
+            # ==================================================
+            # 8. Payment rejected
+            # ==================================================
+
+            elif payment_status == "REJECTED":
+
+                print(
+                    "TABBY PAYMENT REJECTED:",
+                    order.id,
+                    flush=True
+                )
+
+
+                order.payment_status = "failed"
+
+
+                order.save(
+                    update_fields=[
+                        "payment_status"
+                    ]
+                )
+
+
+                print(
+                    "ORDER PAYMENT MARKED AS FAILED",
+                    flush=True
+                )
+
+
+            # ==================================================
+            # 9. Payment expired
+            # ==================================================
+
+            elif payment_status == "EXPIRED":
+
+                print(
+                    "TABBY PAYMENT EXPIRED:",
+                    order.id,
+                    flush=True
+                )
+
+
+                order.payment_status = "failed"
+
+
+                order.save(
+                    update_fields=[
+                        "payment_status"
+                    ]
+                )
+
+
+                print(
+                    "ORDER PAYMENT MARKED AS FAILED",
+                    flush=True
+                )
+
+
+            # ==================================================
+            # 10. Other status
+            # ==================================================
+
+            else:
+
+                print(
+                    "TABBY PAYMENT STATUS NOT HANDLED:",
+                    payment_status,
+                    flush=True
+                )
+
+
+            # ==================================================
+            # 11. Webhook received
+            # ==================================================
+
+            return Response(
+                {
+                    "status": "received"
+                },
+                status=200
+            )
+
+
+        except Exception as e:
+
+            print(
+                "========== TABBY WEBHOOK ERROR ==========",
+                flush=True
+            )
+
+            print(
+                str(e),
+                flush=True
+            )
+
+            traceback.print_exc()
+
+
+            return Response(
+                {
+                    "error": str(e)
+                },
+                status=500
+            )
+
+
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
