@@ -68,3 +68,21 @@ def convert_price(amount, currency):
     rate = get_rate(currency)
 
     return round(float(amount) * rate, 2)
+
+
+def convert_to_aed(amount, currency):
+    """
+    Convert an amount from the selected currency to AED.
+    AED is the base currency.
+    """
+    currency = currency.upper()
+
+    if currency == "AED":
+        return amount
+
+    rate = get_rate(currency)
+
+    if not rate:
+        raise ValueError(f"Unsupported currency: {currency}")
+
+    return amount / rate

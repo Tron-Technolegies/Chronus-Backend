@@ -1049,7 +1049,7 @@ from django.db.models import Q, Avg, Count
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from ChronusUser.currency import convert_price
+from ChronusUser.currency import convert_price, convert_to_aed
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_products(request):
@@ -1106,11 +1106,28 @@ def view_products(request):
         )
 
     # PRICE FILTER
-    if min_price:
-        products = products.filter(price__gte=min_price)
+    # if min_price:
+    #     products = products.filter(price__gte=min_price)
 
-    if max_price:
-        products = products.filter(price__lte=max_price)
+    # if max_price:
+    #     products = products.filter(price__lte=max_price)
+
+
+    # UPDATED PRICE FILTER BASED ON CURRENCY
+    try:
+        if min_price:
+            min_price_aed =convert_to_aed(float(min_price),currency)
+            products = products.filter(price__gte=min_price_aed)
+        if max_price:
+            max_price_aed = convert_to_aed(float(max_price),currency)
+            products = products.filter(price__lte=max_price_aed)
+    except ValueError:
+        return JsonResponse(
+            {"error": "Invalid price or currency"},
+            status=400
+        )
+
+
 
     total_products = products.count()
     total_pages = (total_products + limit - 1) // limit
