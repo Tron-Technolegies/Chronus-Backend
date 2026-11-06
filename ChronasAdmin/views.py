@@ -1561,7 +1561,8 @@ def view_orders(request):
         items = []
         for item in order.items.all():
             items.append({
-                "product_name": item.product.name,
+                # "product_name": item.product.name,
+                "product_name": item.product.name if item.product else "Product unavailable",
                 "supplier": (
                     item.product.supplier.name
                     if item.product and item.product.supplier
