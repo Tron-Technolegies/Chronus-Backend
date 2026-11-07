@@ -573,7 +573,7 @@ def delete_review(request, review_id):
             {"error": "Review not found"},
             status=404
         )
-
+from decimal import Decimal
     
 @api_view(["POST"])
 @permission_classes([AllowAny])
@@ -602,10 +602,25 @@ def checkout(request):
             status=400
         )
 
-    total = 0
+    # total = 0
+
+    # for item in items:
+    #     total += item.quantity * item.price
+
+    # newly added section for hardcoded shipping
+    
+   
+    subtotal = Decimal("0.00")
 
     for item in items:
-        total += item.quantity * item.price
+        subtotal += item.quantity * item.price
+
+        # Fixed shipping charge
+        shipping_charge = Decimal("25.00")
+
+        # Final order amount
+        total = subtotal + shipping_charge
+#  till here
 
         # variant products
         if item.product.product_type == "variant":
@@ -773,10 +788,14 @@ def checkout(request):
         postal_code=postal_code,
 
         shipping_address=shipping_address,
+        
+        subtotal=subtotal,
+        shipping_charge=shipping_charge,
 
         total_amount=total,
 
         currency=currency
+        
     )
 
     Notification.objects.create(
@@ -837,12 +856,41 @@ def checkout(request):
                 update_fields=["stock"]
             )
 
-    converted_total = convert_price(total, currency)
+    # converted_total = convert_price(total, currency)
+    # return Response({
+    #     "order_id": order.id,
+    #     "amount": converted_total,
+    #     "currency": currency,
+    #     "display_amount": convert_price(total, currency)
+    # })
+    # for shipping charge
+    converted_subtotal = convert_price(
+        subtotal,
+        currency
+    )
+
+    converted_shipping = convert_price(
+        shipping_charge,
+        currency
+    )
+
+    converted_total = convert_price(
+        total,
+        currency
+    )
+
     return Response({
         "order_id": order.id,
+
+        "subtotal": converted_subtotal,
+
+        "shipping_charge": converted_shipping,
+
         "amount": converted_total,
+
         "currency": currency,
-        "display_amount": convert_price(total, currency)
+
+        "display_amount": converted_total
     })
 
 
@@ -961,12 +1009,31 @@ class CreatePaymentIntentView(APIView):
                 }
             )
 
+            # return Response({
+            #     "client_secret": intent.client_secret,
+            #     "payment_intent_id": intent.id,
+            #     "currency": currency
+            # })
             return Response({
                 "client_secret": intent.client_secret,
                 "payment_intent_id": intent.id,
+
+                "order_id": order.id,
+
+                "subtotal": convert_amount(
+                    order.subtotal,
+                    currency
+                ),
+
+                "shipping_charge": convert_amount(
+                    order.shipping_charge,
+                    currency
+                ),
+
+                "amount": amount_in_cents,
+
                 "currency": currency
             })
-
         except Order.DoesNotExist:
             return Response({"error": "Invalid order"}, status=404)
         except Exception as e:
