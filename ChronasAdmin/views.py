@@ -3982,5 +3982,124 @@ def create_shipment(request, order_id):
 #             status=500
 #         )
     
+from django.shortcuts import get_object_or_404
 
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+from .models import ShippingPartner
+
+
+# CREATE
+@api_view(["POST"])
+def create_shipping_partner(request):
+
+    partner = ShippingPartner.objects.create(
+        name=request.data.get("name"),
+        shipping_charge=request.data.get("shipping_charge"),
+        estimated_delivery=request.data.get("estimated_delivery"),
+        availability=request.data.get("availability", "available")
+    )
+
+    return Response({
+        "message": "Shipping partner created successfully",
+        "id": partner.id
+    }, status=201)
+
+
+# READ ALL
+@api_view(["GET"])
+def get_shipping_partners(request):
+
+    partners = ShippingPartner.objects.all()
+
+    data = []
+
+    for partner in partners:
+
+        data.append({
+            "id": partner.id,
+            "name": partner.name,
+            "shipping_charge": partner.shipping_charge,
+            "estimated_delivery": partner.estimated_delivery,
+            "availability": partner.availability,
+            "created_at": partner.created_at,
+            "updated_at": partner.updated_at
+        })
+
+    return Response(data)
+
+
+# READ SINGLE
+@api_view(["GET"])
+def get_shipping_partner(request, id):
+
+    partner = get_object_or_404(
+        ShippingPartner,
+        id=id
+    )
+
+    data = {
+        "id": partner.id,
+        "name": partner.name,
+        "shipping_charge": partner.shipping_charge,
+        "estimated_delivery": partner.estimated_delivery,
+        "availability": partner.availability,
+        "created_at": partner.created_at,
+        "updated_at": partner.updated_at
+    }
+
+    return Response(data)
+
+
+# UPDATE
+@api_view(["PUT"])
+def update_shipping_partner(request, id):
+
+    partner = get_object_or_404(
+        ShippingPartner,
+        id=id
+    )
+
+    partner.name = request.data.get(
+        "name",
+        partner.name
+    )
+
+    partner.shipping_charge = request.data.get(
+        "shipping_charge",
+        partner.shipping_charge
+    )
+
+    partner.estimated_delivery = request.data.get(
+        "estimated_delivery",
+        partner.estimated_delivery
+    )
+
+    partner.availability = request.data.get(
+        "availability",
+        partner.availability
+    )
+
+    partner.save()
+
+    return Response({
+        "message": "Shipping partner updated successfully"
+    })
+
+
+# DELETE
+@api_view(["DELETE"])
+def delete_shipping_partner(request, id):
+
+    partner = get_object_or_404(
+        ShippingPartner,
+        id=id
+    )
+
+    partner.delete()
+
+    return Response({
+        "message": "Shipping partner deleted successfully"
+    })
 

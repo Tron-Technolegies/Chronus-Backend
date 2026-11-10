@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 import stripe
-from ChronasAdmin.models import Coupon, Notification, Product, Order, OrderItem, ProductVariant, SubCategory
+from ChronasAdmin.models import Coupon, Notification, Product, Order, OrderItem, ProductVariant, ShippingPartner, SubCategory
 from ChronusUser.utils import apply_coupon_to_order
 from .models import GuestSession, Cart, CartItem, Wishlist, Review
 from ChronasAdmin.models import Category, Brand, Product, Order, Coupon, SubCategory
@@ -575,6 +575,341 @@ def delete_review(request, review_id):
         )
 from decimal import Decimal
     
+# @api_view(["POST"])
+# @permission_classes([AllowAny])
+# def checkout(request):
+
+#     currency = request.data.get(
+#         "currency",
+#         "AED"
+#     ).upper()
+
+#     # Selected shipping partner
+
+#     shipping_partner_id = request.data.get(
+#         "shipping_partner_id"
+#     )
+
+#     if not shipping_partner_id:
+
+#         return Response(
+#             {"error": "Please select a shipping partner"},
+#             status=400
+#         )
+
+
+#     shipping_partner = ShippingPartner.objects.filter(
+#         id=shipping_partner_id,
+#         availability="available"
+#     ).first()
+
+#     if not shipping_partner:
+
+#         return Response(
+#             {"error": "Selected shipping partner is unavailable"},
+#             status=400
+#         )
+
+#     cart = get_cart(request)
+
+#     items = CartItem.objects.select_related(
+#         "product",
+#         "variant",
+#         "size",
+#         "frame",
+#         "material"
+#     ).filter(
+#         cart=cart
+#     )
+
+#     if not items.exists():
+#         return Response(
+#             {"error": "Cart is empty"},
+#             status=400
+#         )
+#     # Calculate product subtotal
+
+#     subtotal = Decimal("0.00")
+
+#     for item in items:
+
+#         subtotal += item.quantity * item.price
+
+
+#         # Get shipping charge from selected partner
+
+#         shipping_charge = shipping_partner.shipping_charge
+
+
+#         # Calculate final order amount
+
+#         total = subtotal + shipping_charge
+
+
+
+#         # variant products
+#         if item.product.product_type == "variant":
+#             if not item.variant:
+#                 return Response(
+#                     {
+#                         "error":(
+#                             f"variant missing for "
+#                             f"{item.product.name}"
+#                         )
+#                     },
+#                     status=400
+#                 )
+#             if item.variant.stock < item.quantity:
+#                 return Response(
+#                     {
+#                         "error": (
+#                         f"Only {item.variant.stock} "
+#                         f"item(s) available for "
+#                         f"{item.product.name}"
+#                         )
+#                     },
+#                     status=400
+#                 )
+#         # fineart
+#         else:
+#             if item.product.stock < item.quantity:
+#                 return Response(
+#                     {
+#                         "error": (
+#                             f"Only {item.product.stock} "
+#                             f"item(s) available for "
+#                             f"{item.product.name}"
+#                         )
+#                     },
+#                     status=400
+#                 )
+
+            
+
+#     guest_id = None
+
+#     if not request.user.is_authenticated:
+
+#         guest_id = request.headers.get(
+#             "X-Guest-Id"
+#         )
+
+#         if not guest_id:
+#             return Response(
+#                 {"error": "guest_id required"},
+#                 status=400
+#             )
+
+#     address_id = request.data.get(
+#         "address_id"
+#     )
+
+#     # Logged-in user using saved address
+#     if request.user.is_authenticated and address_id:
+
+#         address = Address.objects.filter(
+#             id=address_id,
+#             user=request.user
+#         ).first()
+
+#         if not address:
+#             return Response(
+#                 {"error": "Address not found"},
+#                 status=404
+#             )
+
+
+#         receiver_name = address.full_name
+
+
+#         address_line_1 = address.address_line_1
+#         address_line_2 = address.address_line_2
+
+#         city = address.city
+#         state = address.state
+#         country = address.country
+#         postal_code = address.postal_code
+
+#         shipping_address = (
+#             f"{receiver_name}, "
+#             f"{address_line_1}, "
+#             f"{address_line_2}, "
+#             f"{city}, "
+#             f"{state}, "
+#             f"{country}, "
+#             f"{postal_code}"
+#         )
+
+#         phone = address.phone
+
+#     # Guest checkout OR logged-in user manual address
+#     else:
+
+#         receiver_name = (
+#             f"{request.data.get('first_name','')} "
+#             f"{request.data.get('last_name','')}"
+#         ).strip()
+
+#         phone = request.data.get("phone","")
+
+#         address_line_1 = request.data.get(
+#             "address_line_1",
+#             ""
+#         )
+
+#         address_line_2 = request.data.get(
+#             "address_line_2",
+#             ""
+#         )
+
+#         city = request.data.get("city","")
+
+#         state = request.data.get("state","")
+
+#         country = request.data.get("country","")
+
+#         postal_code = request.data.get(
+#             "postal_code",
+#             ""
+#         )
+
+#         shipping_address = (
+#             f"{receiver_name}, "
+#             f"{address_line_1}, "
+#             f"{address_line_2}, "
+#             f"{city}, "
+#             f"{state}, "
+#             f"{country}, "
+#             f"{postal_code}"
+#         )
+#         if not shipping_address:
+#             return Response(
+#                 {"error": "shipping address required"},
+#                 status=400
+#             )
+
+#     order = Order.objects.create(
+
+#         user=(
+#             request.user
+#             if request.user.is_authenticated
+#             else None
+#         ),
+
+#         guest_id=guest_id,
+
+#         email=request.data.get("email"),
+
+#         phone=phone,
+
+#         receiver_name=receiver_name,
+
+#         address_line_1=address_line_1,
+#         address_line_2=address_line_2,
+
+#         city=city,
+#         state=state,
+#         country=country,
+#         postal_code=postal_code,
+
+#         shipping_address=shipping_address,
+        
+#         subtotal=subtotal,
+
+#         total_amount=total,
+
+#         currency=currency,
+#         shipping_address=shipping_address,
+
+#         subtotal=subtotal,
+#         shipping_charge=shipping_charge,
+#         shipping_partner=shipping_partner,
+
+#         total_amount=total,
+
+#         currency=currency
+        
+#     )
+
+#     Notification.objects.create(
+#         title="New Order Received",
+#         message=(
+#             f"Order #{order.id} "
+#             f"has been placed for "
+#             f"{order.total_amount}"
+#         )
+#     )
+
+
+#     order_items = []
+#     for item in items:
+#         order_items.append(
+#             OrderItem(
+#                 order = order,
+#                 product = item.product,
+#                 variant = item.variant,
+#                 size=item.size,
+#                 frame=item.frame,
+#                 material=item.material,
+#                 quantity=item.quantity,
+#                 price=item.price
+
+#             )
+#         )
+
+#     OrderItem.objects.bulk_create(
+#         order_items
+#     )
+
+#     for item in items:
+#         if item.product.product_type == "variant":
+
+#             item.variant.stock -= item.quantity
+#             item.variant.save(
+#                 update_fields=["stock"]
+#             )
+        
+#         else:
+
+#             item.product.stock -= item.quantity
+#             item.product.save(
+#                 update_fields=["stock"]
+#             )
+
+#     converted_subtotal = convert_price(
+#         subtotal,
+#         currency
+#     )
+
+#     converted_shipping = convert_price(
+#         shipping_charge,
+#         currency
+#     )
+
+#     converted_total = convert_price(
+#         total,
+#         currency
+#     )
+
+#     return Response({
+#         "order_id": order.id,
+
+#         "subtotal": converted_subtotal,
+#         "shipping_partner": {
+#         "id": shipping_partner.id,
+#         "name": shipping_partner.name
+#         },
+
+#         "shipping_charge": converted_shipping,
+
+#         "amount": converted_total,
+
+#         "currency": currency,
+
+#         "display_amount": converted_total
+#     })
+
+
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def checkout(request):
@@ -583,6 +918,35 @@ def checkout(request):
         "currency",
         "AED"
     ).upper()
+
+    # ----------------------------------
+    # 1. SELECT SHIPPING PARTNER
+    # ----------------------------------
+
+    shipping_partner_id = request.data.get(
+        "shipping_partner_id"
+    )
+
+    if not shipping_partner_id:
+        return Response(
+            {"error": "Please select a shipping partner"},
+            status=400
+        )
+
+    shipping_partner = ShippingPartner.objects.filter(
+        id=shipping_partner_id,
+        availability="available"
+    ).first()
+
+    if not shipping_partner:
+        return Response(
+            {"error": "Selected shipping partner is unavailable"},
+            status=400
+        )
+
+    # ----------------------------------
+    # 2. GET CART
+    # ----------------------------------
 
     cart = get_cart(request)
 
@@ -602,52 +966,69 @@ def checkout(request):
             status=400
         )
 
-    # total = 0
+    # ----------------------------------
+    # 3. CALCULATE SUBTOTAL
+    # ----------------------------------
 
-    # for item in items:
-    #     total += item.quantity * item.price
-
-    # newly added section for hardcoded shipping
-    
-   
     subtotal = Decimal("0.00")
 
     for item in items:
-        subtotal += item.quantity * item.price
 
-        # Fixed shipping charge
-        shipping_charge = Decimal("25.00")
+        subtotal += (
+            item.quantity * item.price
+        )
 
-        # Final order amount
-        total = subtotal + shipping_charge
-#  till here
+    # ----------------------------------
+    # 4. CALCULATE SHIPPING AND TOTAL
+    # ----------------------------------
 
-        # variant products
+    shipping_charge = (
+        shipping_partner.shipping_charge
+    )
+
+    total = subtotal + shipping_charge
+
+    # ----------------------------------
+    # 5. VALIDATE STOCK
+    # ----------------------------------
+
+    for item in items:
+
+        # VARIANT PRODUCTS
+
         if item.product.product_type == "variant":
+
             if not item.variant:
+
                 return Response(
                     {
-                        "error":(
-                            f"variant missing for "
+                        "error": (
+                            f"Variant missing for "
                             f"{item.product.name}"
                         )
                     },
                     status=400
                 )
+
             if item.variant.stock < item.quantity:
+
                 return Response(
                     {
                         "error": (
-                        f"Only {item.variant.stock} "
-                        f"item(s) available for "
-                        f"{item.product.name}"
+                            f"Only {item.variant.stock} "
+                            f"item(s) available for "
+                            f"{item.product.name}"
                         )
                     },
                     status=400
                 )
-        # fineart
+
+        # FINE ART PRODUCTS
+
         else:
+
             if item.product.stock < item.quantity:
+
                 return Response(
                     {
                         "error": (
@@ -659,7 +1040,9 @@ def checkout(request):
                     status=400
                 )
 
-            
+    # ----------------------------------
+    # 6. GUEST CHECKOUT
+    # ----------------------------------
 
     guest_id = None
 
@@ -670,16 +1053,22 @@ def checkout(request):
         )
 
         if not guest_id:
+
             return Response(
                 {"error": "guest_id required"},
                 status=400
             )
+
+    # ----------------------------------
+    # 7. SHIPPING ADDRESS
+    # ----------------------------------
 
     address_id = request.data.get(
         "address_id"
     )
 
     # Logged-in user using saved address
+
     if request.user.is_authenticated and address_id:
 
         address = Address.objects.filter(
@@ -688,14 +1077,13 @@ def checkout(request):
         ).first()
 
         if not address:
+
             return Response(
                 {"error": "Address not found"},
                 status=404
             )
 
-
         receiver_name = address.full_name
-
 
         address_line_1 = address.address_line_1
         address_line_2 = address.address_line_2
@@ -705,27 +1093,21 @@ def checkout(request):
         country = address.country
         postal_code = address.postal_code
 
-        shipping_address = (
-            f"{receiver_name}, "
-            f"{address_line_1}, "
-            f"{address_line_2}, "
-            f"{city}, "
-            f"{state}, "
-            f"{country}, "
-            f"{postal_code}"
-        )
-
         phone = address.phone
 
-    # Guest checkout OR logged-in user manual address
+    # Guest checkout OR manual address
+
     else:
 
         receiver_name = (
-            f"{request.data.get('first_name','')} "
-            f"{request.data.get('last_name','')}"
+            f"{request.data.get('first_name', '')} "
+            f"{request.data.get('last_name', '')}"
         ).strip()
 
-        phone = request.data.get("phone","")
+        phone = request.data.get(
+            "phone",
+            ""
+        )
 
         address_line_1 = request.data.get(
             "address_line_1",
@@ -737,31 +1119,56 @@ def checkout(request):
             ""
         )
 
-        city = request.data.get("city","")
+        city = request.data.get(
+            "city",
+            ""
+        )
 
-        state = request.data.get("state","")
+        state = request.data.get(
+            "state",
+            ""
+        )
 
-        country = request.data.get("country","")
+        country = request.data.get(
+            "country",
+            ""
+        )
 
         postal_code = request.data.get(
             "postal_code",
             ""
         )
 
-        shipping_address = (
-            f"{receiver_name}, "
-            f"{address_line_1}, "
-            f"{address_line_2}, "
-            f"{city}, "
-            f"{state}, "
-            f"{country}, "
-            f"{postal_code}"
+    # ----------------------------------
+    # 8. VALIDATE ADDRESS
+    # ----------------------------------
+
+    if not address_line_1 or not city or not country:
+
+        return Response(
+            {
+                "error": "Shipping address required"
+            },
+            status=400
         )
-        if not shipping_address:
-            return Response(
-                {"error": "shipping address required"},
-                status=400
-            )
+
+    # ----------------------------------
+    # 9. CREATE SHIPPING ADDRESS STRING
+    # ----------------------------------
+
+    shipping_address = (
+        f"{receiver_name}, "
+        f"{address_line_1}, "
+        f"{address_line_2}, "
+        f"{city}, "
+        f"{state}, "
+        f"{country}, "
+        f"{postal_code}"
+    )
+
+    # ----------------------------------
+    # 10. CREATE ORDER
+    # ----------------------------------
 
     order = Order.objects.create(
 
@@ -773,7 +1180,9 @@ def checkout(request):
 
         guest_id=guest_id,
 
-        email=request.data.get("email"),
+        email=request.data.get(
+            "email"
+        ),
 
         phone=phone,
 
@@ -788,82 +1197,99 @@ def checkout(request):
         postal_code=postal_code,
 
         shipping_address=shipping_address,
-        
-        subtotal=subtotal,
+
+        shipping_partner=shipping_partner,
+
         shipping_charge=shipping_charge,
 
         total_amount=total,
 
         currency=currency
-        
+
     )
 
+    # ----------------------------------
+    # 11. CREATE NOTIFICATION
+    # ----------------------------------
+
     Notification.objects.create(
+
         title="New Order Received",
+
         message=(
             f"Order #{order.id} "
             f"has been placed for "
             f"{order.total_amount}"
         )
+
     )
 
-    # order_items = [
+    # ----------------------------------
+    # 12. CREATE ORDER ITEMS
+    # ----------------------------------
 
-    #     OrderItem(
-    #         order=order,
-    #         product=item.product,
-    #         size=item.size,
-    #         frame=item.frame,
-    #         material=item.material,
-    #         quantity=item.quantity,
-    #         price=item.price
-    #     )
-
-    #     for item in items
-    # ]
     order_items = []
+
     for item in items:
+
         order_items.append(
+
             OrderItem(
-                order = order,
-                product = item.product,
-                variant = item.variant,
+
+                order=order,
+
+                product=item.product,
+
+                variant=item.variant,
+
                 size=item.size,
+
                 frame=item.frame,
+
                 material=item.material,
+
                 quantity=item.quantity,
+
                 price=item.price
 
             )
+
         )
 
     OrderItem.objects.bulk_create(
         order_items
     )
 
+    # ----------------------------------
+    # 13. DEDUCT STOCK
+    # ----------------------------------
+
     for item in items:
+
+        # VARIANT PRODUCTS
+
         if item.product.product_type == "variant":
 
             item.variant.stock -= item.quantity
+
             item.variant.save(
                 update_fields=["stock"]
             )
-        
+
+        # FINE ART PRODUCTS
+
         else:
 
             item.product.stock -= item.quantity
+
             item.product.save(
                 update_fields=["stock"]
             )
 
-    # converted_total = convert_price(total, currency)
-    # return Response({
-    #     "order_id": order.id,
-    #     "amount": converted_total,
-    #     "currency": currency,
-    #     "display_amount": convert_price(total, currency)
-    # })
-    # for shipping charge
+    # ----------------------------------
+    # 14. CURRENCY CONVERSION
+    # ----------------------------------
+
     converted_subtotal = convert_price(
         subtotal,
         currency
@@ -879,19 +1305,39 @@ def checkout(request):
         currency
     )
 
-    return Response({
-        "order_id": order.id,
+    # ----------------------------------
+    # 15. RESPONSE
+    # ----------------------------------
 
-        "subtotal": converted_subtotal,
+    return Response(
 
-        "shipping_charge": converted_shipping,
+        {
 
-        "amount": converted_total,
+            "order_id": order.id,
 
-        "currency": currency,
+            "subtotal": converted_subtotal,
 
-        "display_amount": converted_total
-    })
+            "shipping_partner": {
+
+                "id": shipping_partner.id,
+
+                "name": shipping_partner.name
+
+            },
+
+            "shipping_charge": converted_shipping,
+
+            "amount": converted_total,
+
+            "currency": currency,
+
+            "display_amount": converted_total
+
+        },
+
+        status=201
+
+    )
 
 
 # ===============================

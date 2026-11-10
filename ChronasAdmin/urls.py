@@ -67,6 +67,10 @@ urlpatterns = [
 
  
 
-
+    path("shipping-partners/",views.get_shipping_partners,name="get_shipping_partners"),
+    path("shipping-partners/create/",views.create_shipping_partner,name="create_shipping_partner"),
+    path("shipping-partners/<int:id>/",views.get_shipping_partner,name="get_shipping_partner"),
+    path("shipping-partners/<int:id>/update/",views.update_shipping_partner,name="update_shipping_partner"),
+    path("shipping-partners/<int:id>/delete/",views.delete_shipping_partner,name="delete_shipping_partner")
 
 ]
