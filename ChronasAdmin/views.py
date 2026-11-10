@@ -9,10 +9,11 @@ from django.http import HttpResponse
 from datetime import datetime
 import cloudinary.uploader
 from rest_framework_simplejwt.tokens import RefreshToken
-
+from rest_framework.decorators import api_view, permission_classes
 from ChronasAdmin.models import Category, Brand, FineArtSize, Product, Order, Coupon, ProductImage, SubCategory
 from ChronasAdmin.shipping.unified import create_unified_shipment
 from ChronusUser.models import Cart, CartItem
+from .permissions import StoreManagerPermission
 
 # Create your views here.
 
@@ -65,6 +66,7 @@ def view_users(request):
 
 @csrf_exempt
 @require_http_methods(["POST"])
+@permission_classes([StoreManagerPermission])
 def add_category(request):
     try:
         name = request.POST.get("name")
@@ -107,6 +109,7 @@ def add_category(request):
 from django.db.models import Count
 
 @require_http_methods(["GET"])
+@permission_classes([StoreManagerPermission])
 def view_categories(request):
     search = request.GET.get("search", "")
 
@@ -132,6 +135,7 @@ def view_categories(request):
 
 @csrf_exempt
 @require_http_methods(["POST"])
+@permission_classes([StoreManagerPermission])
 def update_category(request, category_id):
     try:
         category = Category.objects.get(id=category_id)
@@ -182,6 +186,7 @@ def update_category(request, category_id):
         return JsonResponse({"error": str(e)}, status=500)
 @csrf_exempt
 @require_http_methods(["DELETE"])
+@permission_classes([StoreManagerPermission])
 def delete_category(request, category_id):
     try:
         category = Category.objects.get(id=category_id)
@@ -195,6 +200,7 @@ def delete_category(request, category_id):
 
 @csrf_exempt
 @require_http_methods(["POST"])
+@permission_classes([StoreManagerPermission])
 def add_brand(request):
     try:
         data = json.loads(request.body)
@@ -218,6 +224,7 @@ def add_brand(request):
     
 
 @require_http_methods(["GET"])
+@permission_classes([StoreManagerPermission])
 def view_brands(request):
     search = request.GET.get("search", "")
 
@@ -240,6 +247,7 @@ def view_brands(request):
 
 @csrf_exempt
 @require_http_methods(["PUT"])
+@permission_classes([StoreManagerPermission])
 def update_brand(request, brand_id):
     try:
         brand = Brand.objects.get(id=brand_id)
@@ -267,6 +275,7 @@ def update_brand(request, brand_id):
 
 @csrf_exempt
 @require_http_methods(["DELETE"])
+@permission_classes([StoreManagerPermission])
 def delete_brand(request, brand_id):
     try:
         brand = Brand.objects.get(id=brand_id)
@@ -288,7 +297,6 @@ from rest_framework.decorators import (
     permission_classes,
 )
 
-from .permissions import StoreManagerPermission
 
 
 @api_view(["POST"])
@@ -648,6 +656,7 @@ from django.db.models import Q
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@permission_classes([StoreManagerPermission])
 def view_products(request):
 
     category = request.GET.get("category")
@@ -1329,6 +1338,7 @@ import cloudinary.uploader
 
 @csrf_exempt
 @require_http_methods(["POST"])
+@permission_classes([StoreManagerPermission])
 def update_product(request, product_id):
 
     # --------------------------------------------------
@@ -2262,6 +2272,7 @@ def update_product(request, product_id):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@permission_classes([StoreManagerPermission])
 def view_single_product(request, product_id):
     try:
         product = Product.objects.select_related(
@@ -2455,6 +2466,7 @@ def view_single_product(request, product_id):
     
 @csrf_exempt
 @require_http_methods(["DELETE"])
+@permission_classes([StoreManagerPermission])
 def delete_product(request, product_id):
     try:
         product = Product.objects.get(id=product_id)
@@ -2513,6 +2525,7 @@ def delete_product(request, product_id):
         )
 
 @require_http_methods(["GET"])
+@permission_classes([StoreManagerPermission])
 def view_orders(request):
 
     # orders = Order.objects.prefetch_related("items__product").all()
@@ -2557,6 +2570,7 @@ import json
 
 @require_http_methods(["POST"])
 @csrf_exempt
+@permission_classes([StoreManagerPermission])
 def update_order_status(request, order_id):
 
     try:
@@ -2603,6 +2617,7 @@ def update_order_status(request, order_id):
         )
     
 @require_http_methods(["GET"])
+@permission_classes([StoreManagerPermission])
 def order_detail_api(request, id):
     order = get_object_or_404(
         Order.objects.select_related("user")
@@ -2689,6 +2704,7 @@ def order_detail_api(request, id):
     
 @csrf_exempt
 @require_http_methods(["POST"])
+@permission_classes([StoreManagerPermission])
 def add_coupon(request):
     try:
         data = json.loads(request.body)
@@ -2725,6 +2741,7 @@ def add_coupon(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@permission_classes([StoreManagerPermission])
 def view_coupons(request):
     coupons = Coupon.objects.all()
 
@@ -2744,7 +2761,7 @@ def view_coupons(request):
 
 @csrf_exempt
 @require_http_methods(["PUT"])
-
+@permission_classes([StoreManagerPermission])
 def update_coupon(request, coupon_id):
     try:
         coupon = Coupon.objects.get(id=coupon_id)
@@ -2772,6 +2789,7 @@ def update_coupon(request, coupon_id):
     
 @csrf_exempt
 @require_http_methods(["DELETE"])
+@permission_classes([StoreManagerPermission])
 def delete_coupon(request, coupon_id):
     try:
         coupon = Coupon.objects.get(id=coupon_id)
@@ -2871,6 +2889,7 @@ from django.views.decorators.http import require_http_methods
 
 
 @require_http_methods(["GET"])
+@permission_classes([StoreManagerPermission])
 def dashboard_stats(request):
 
     now = timezone.now()
@@ -3151,6 +3170,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 
 @csrf_exempt
 @require_http_methods(["POST"])
+@permission_classes([StoreManagerPermission])
 def create_subcategory(request):
     try:
         data = json.loads(request.body)
@@ -3175,7 +3195,7 @@ def create_subcategory(request):
 from django.http import JsonResponse
 from .models import SubCategory
 
-
+@permission_classes([StoreManagerPermission])
 def list_subcategories(request):
     if request.method != "GET":
         return JsonResponse({"error": "GET required"}, status=405)
@@ -3197,6 +3217,7 @@ import json
 
 @csrf_exempt
 @require_http_methods(["PUT", "PATCH"])
+@permission_classes([StoreManagerPermission])
 def update_subcategory(request, pk):
     sub = get_object_or_404(SubCategory, pk=pk)
 
@@ -3225,6 +3246,7 @@ from django.views.decorators.http import require_http_methods
 
 @csrf_exempt
 @require_http_methods(["DELETE"])
+@permission_classes([StoreManagerPermission])
 def delete_subcategory(request, pk):
     sub = get_object_or_404(SubCategory, pk=pk)
     sub.delete()
@@ -3416,6 +3438,7 @@ from .models import Frame, Material
 # ---------------- FRAME ---------------- #
 @csrf_exempt
 @require_http_methods(["POST"])
+@permission_classes([StoreManagerPermission])
 def create_frame(request):
 
     name = request.POST.get("name")
@@ -3435,6 +3458,7 @@ def create_frame(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@permission_classes([StoreManagerPermission])
 def list_frames(request):
 
     frames = Frame.objects.all()
@@ -3453,6 +3477,7 @@ def list_frames(request):
 
 @csrf_exempt
 @require_http_methods(["POST"])
+@permission_classes([StoreManagerPermission])
 def update_frame(request, frame_id):
 
     try:
@@ -3484,6 +3509,7 @@ def update_frame(request, frame_id):
 
 @csrf_exempt
 @require_http_methods(["DELETE"])
+@permission_classes([StoreManagerPermission])
 def delete_frame(request, frame_id):
 
     try:
@@ -3499,6 +3525,7 @@ def delete_frame(request, frame_id):
 # ---------------- MATERIAL ---------------- #
 @csrf_exempt
 @require_http_methods(["POST"])
+@permission_classes([StoreManagerPermission])
 def create_material(request):
 
     name = request.POST.get("name")
@@ -3592,6 +3619,7 @@ def update_material(request, material_id):
     
 @csrf_exempt
 @require_http_methods(["DELETE"])
+@permission_classes([StoreManagerPermission])
 def delete_material(request, material_id):
 
     try:
@@ -3619,6 +3647,7 @@ import json
 
 @require_http_methods(["POST"])
 @csrf_exempt
+@permission_classes([StoreManagerPermission])
 def add_supplier(request):
     try:
         data = json.loads(request.body)
@@ -3653,6 +3682,7 @@ def add_supplier(request):
 
 
 @require_http_methods(["GET"])
+@permission_classes([StoreManagerPermission])
 def supplier_list(request):
 
     suppliers = Supplier.objects.all().order_by("-id")
@@ -3678,6 +3708,7 @@ def supplier_list(request):
 from django.shortcuts import get_object_or_404
 
 @require_http_methods(["GET"])
+@permission_classes([StoreManagerPermission])
 def supplier_detail(request, id):
 
     supplier = get_object_or_404(
@@ -3700,6 +3731,7 @@ def supplier_detail(request, id):
 
 @require_http_methods(["PUT"])
 @csrf_exempt
+@permission_classes([StoreManagerPermission])
 def update_supplier(request, id):
 
     try:
@@ -3759,6 +3791,7 @@ def update_supplier(request, id):
 
 @require_http_methods(["DELETE"])
 @csrf_exempt
+@permission_classes([StoreManagerPermission])
 def delete_supplier(request, id):
 
     supplier = get_object_or_404(
@@ -3774,6 +3807,7 @@ def delete_supplier(request, id):
 
 
 @api_view(["GET"])
+@permission_classes([StoreManagerPermission])
 def get_notifications(request):
 
     notifications = Notification.objects.all()
@@ -3801,7 +3835,9 @@ from .utils import send_shipment_email
 
 
 @require_http_methods(["POST"])
+@permission_classes([StoreManagerPermission])
 @csrf_exempt
+
 def create_shipment(request, order_id):
 
     try:
@@ -4098,6 +4134,7 @@ from .models import ShippingPartner
 
 # CREATE
 @api_view(["POST"])
+@permission_classes([StoreManagerPermission])
 def create_shipping_partner(request):
 
     partner = ShippingPartner.objects.create(
@@ -4115,6 +4152,7 @@ def create_shipping_partner(request):
 
 # READ ALL
 @api_view(["GET"])
+@permission_classes([StoreManagerPermission])
 def get_shipping_partners(request):
 
     partners = ShippingPartner.objects.all()
@@ -4138,6 +4176,7 @@ def get_shipping_partners(request):
 
 # READ SINGLE
 @api_view(["GET"])
+@permission_classes([StoreManagerPermission])
 def get_shipping_partner(request, id):
 
     partner = get_object_or_404(
@@ -4160,6 +4199,7 @@ def get_shipping_partner(request, id):
 
 # UPDATE
 @api_view(["PUT"])
+@permission_classes([StoreManagerPermission])
 def update_shipping_partner(request, id):
 
     partner = get_object_or_404(
@@ -4196,6 +4236,7 @@ def update_shipping_partner(request, id):
 
 # DELETE
 @api_view(["DELETE"])
+@permission_classes([StoreManagerPermission])
 def delete_shipping_partner(request, id):
 
     partner = get_object_or_404(

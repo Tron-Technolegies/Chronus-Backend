@@ -1,7 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from cloudinary.models import CloudinaryField
-from .models import ShippingPartner
+# from .models import ShippingPartner
 
 
 # Create your models here.
@@ -215,7 +215,7 @@ class Order(models.Model):
 
     label_url = models.URLField(null=True, blank=True)
 
-    shipping_partner = models.ForeignKey(ShippingPartner,on_delete=models.SET_NULL,null=True,blank=True)
+    shipping_partner = models.ForeignKey('ShippingPartner',on_delete=models.SET_NULL,null=True,blank=True)
     shipping_charge = models.DecimalField(max_digits=12,decimal_places=2,default=0)
 
 
