@@ -283,10 +283,17 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.db import transaction
+from rest_framework.decorators import (
+    api_view,
+    permission_classes,
+)
 
+from .permissions import StoreManagerPermission
+
+
+@api_view(["POST"])
+@permission_classes([StoreManagerPermission])
 @transaction.atomic
-@csrf_exempt
-@require_http_methods(["POST"])
 def add_products(request):
     try:
         supplier_id = request.POST.get("supplier")
@@ -616,12 +623,19 @@ def add_products(request):
                 },
                 status=201
             )
-
     except Exception as e:
+        transaction.set_rollback(True)
+
         return JsonResponse({
             "error": "Something went wrong",
             "details": str(e)
         }, status=500)
+
+    # except Exception as e:
+    #     return JsonResponse({
+    #         "error": "Something went wrong",
+    #         "details": str(e)
+    #     }, status=500)
     
 
 
@@ -3236,37 +3250,129 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 
+# @api_view(["POST"])
+# @permission_classes([AllowAny])
+# def admin_login(request):
+#     email = request.data.get("email")
+#     password = request.data.get("password")
+
+#     try:
+#         user_obj = User.objects.get(email=email)
+#     except User.DoesNotExist:
+#         return Response({"error": "Invalid credentials"}, status=401)
+
+#     user = authenticate(request, username=user_obj.username, password=password)
+
+#     if user is None:
+#         return Response({"error": "Invalid credentials"}, status=401)
+
+#     if not user.is_staff:
+#         return Response({"error": "Access denied. Admins only."}, status=403)
+
+#     tokens = get_tokens_for_user(user)
+
+#     full_name = f"{user.first_name} {user.last_name}".strip()
+
+#     return Response({
+#         "message": "Admin login successful",
+#         "user_id": user.id,
+#         "email": user.email,
+#         "full_name": full_name,
+#         "tokens": tokens
+#     })
+
+
+from django.contrib.auth import authenticate
+from django.contrib.auth.models import User, Group
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+
+
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def admin_login(request):
+
     email = request.data.get("email")
     password = request.data.get("password")
 
+    # Find user
     try:
         user_obj = User.objects.get(email=email)
-    except User.DoesNotExist:
-        return Response({"error": "Invalid credentials"}, status=401)
 
-    user = authenticate(request, username=user_obj.username, password=password)
+    except User.DoesNotExist:
+        return Response(
+            {"error": "Invalid credentials"},
+            status=401
+        )
+
+    # Authenticate
+    user = authenticate(
+        request,
+        username=user_obj.username,
+        password=password
+    )
 
     if user is None:
-        return Response({"error": "Invalid credentials"}, status=401)
+        return Response(
+            {"error": "Invalid credentials"},
+            status=401
+        )
 
+    # Check staff access
     if not user.is_staff:
-        return Response({"error": "Access denied. Admins only."}, status=403)
+        return Response(
+            {"error": "Access denied"},
+            status=403
+        )
 
+    # Identify role
+    if user.is_superuser:
+
+        role = "super_admin"
+
+    elif user.groups.filter(
+        name="Store Manager"
+    ).exists():
+
+        role = "store_manager"
+
+    else:
+
+        return Response(
+            {
+                "error": (
+                    "Access denied. "
+                    "No authorized admin role assigned."
+                )
+            },
+            status=403
+        )
+
+    # Generate tokens
     tokens = get_tokens_for_user(user)
 
-    full_name = f"{user.first_name} {user.last_name}".strip()
+    full_name = (
+        f"{user.first_name} {user.last_name}"
+    ).strip()
 
-    return Response({
-        "message": "Admin login successful",
-        "user_id": user.id,
-        "email": user.email,
-        "full_name": full_name,
-        "tokens": tokens
-    })
+    return Response(
+        {
+            "message": "Login successful",
 
+            "user_id": user.id,
+
+            "email": user.email,
+
+            "full_name": full_name,
+
+            "role": role,
+
+            "tokens": tokens
+        },
+        status=200
+    )
 
 @csrf_exempt
 def ziina_webhook(request):
