@@ -4328,3 +4328,34 @@ def view_profile(request):
         "phone_number": getattr(user, "phone_number", None),
         "full_name": f"{user.first_name} {user.last_name}".strip(),
     })
+
+
+
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+
+from ChronasAdmin.models import ShippingPartner
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def user_shipping_partners(request):
+
+    partners = ShippingPartner.objects.filter(
+        availability="available"
+    ).order_by("name")
+
+    data = []
+
+    for partner in partners:
+        data.append({
+            "id": partner.id,
+            "name": partner.name,
+            "shipping_charge": partner.shipping_charge,
+            "estimated_delivery": partner.estimated_delivery,
+            "availability": partner.availability,
+        })
+
+    return Response(data)

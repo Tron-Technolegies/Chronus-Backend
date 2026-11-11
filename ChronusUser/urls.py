@@ -53,6 +53,7 @@ urlpatterns = [
     path("profile/update/", views.update_profile, name="update-profile"),
     path("profile/", views.view_profile, name="view_profile"),
 
+    path('view_shipping_partners_by_user', views.user_shipping_partners, name='user_shipping_partners')
 
     
 ]
