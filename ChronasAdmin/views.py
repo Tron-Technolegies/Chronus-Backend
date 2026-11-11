@@ -13,12 +13,18 @@ from rest_framework.decorators import api_view, permission_classes
 from ChronasAdmin.models import Category, Brand, FineArtSize, Product, Order, Coupon, ProductImage, SubCategory
 from ChronasAdmin.shipping.unified import create_unified_shipment
 from ChronusUser.models import Cart, CartItem
-from .permissions import StoreManagerPermission
+from .permissions import (
+    StoreManagerPermission,
+    StoreManagerOrSuperAdmin,
+    SuperAdminPermission,
+    admin_access,
+)
 
 # Create your views here.
 
 
 @require_http_methods(["GET"])
+@admin_access(SuperAdminPermission)
 def view_users(request):
     users = User.objects.all()
 
@@ -66,7 +72,7 @@ def view_users(request):
 
 @csrf_exempt
 @require_http_methods(["POST"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def add_category(request):
     try:
         name = request.POST.get("name")
@@ -109,7 +115,7 @@ def add_category(request):
 from django.db.models import Count
 
 @require_http_methods(["GET"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def view_categories(request):
     search = request.GET.get("search", "")
 
@@ -135,7 +141,7 @@ def view_categories(request):
 
 @csrf_exempt
 @require_http_methods(["POST"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def update_category(request, category_id):
     try:
         category = Category.objects.get(id=category_id)
@@ -186,7 +192,7 @@ def update_category(request, category_id):
         return JsonResponse({"error": str(e)}, status=500)
 @csrf_exempt
 @require_http_methods(["DELETE"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def delete_category(request, category_id):
     try:
         category = Category.objects.get(id=category_id)
@@ -200,7 +206,7 @@ def delete_category(request, category_id):
 
 @csrf_exempt
 @require_http_methods(["POST"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def add_brand(request):
     try:
         data = json.loads(request.body)
@@ -224,7 +230,7 @@ def add_brand(request):
     
 
 @require_http_methods(["GET"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def view_brands(request):
     search = request.GET.get("search", "")
 
@@ -247,7 +253,7 @@ def view_brands(request):
 
 @csrf_exempt
 @require_http_methods(["PUT"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def update_brand(request, brand_id):
     try:
         brand = Brand.objects.get(id=brand_id)
@@ -275,7 +281,7 @@ def update_brand(request, brand_id):
 
 @csrf_exempt
 @require_http_methods(["DELETE"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def delete_brand(request, brand_id):
     try:
         brand = Brand.objects.get(id=brand_id)
@@ -300,7 +306,7 @@ from rest_framework.decorators import (
 
 
 @api_view(["POST"])
-@permission_classes([StoreManagerPermission])
+@permission_classes([StoreManagerOrSuperAdmin])
 @transaction.atomic
 def add_products(request):
     try:
@@ -656,7 +662,7 @@ from django.db.models import Q
 
 @csrf_exempt
 @require_http_methods(["GET"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def view_products(request):
 
     category = request.GET.get("category")
@@ -1338,7 +1344,7 @@ import cloudinary.uploader
 
 @csrf_exempt
 @require_http_methods(["POST"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def update_product(request, product_id):
 
     # --------------------------------------------------
@@ -2272,7 +2278,7 @@ def update_product(request, product_id):
 
 @csrf_exempt
 @require_http_methods(["GET"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def view_single_product(request, product_id):
     try:
         product = Product.objects.select_related(
@@ -2466,7 +2472,7 @@ def view_single_product(request, product_id):
     
 @csrf_exempt
 @require_http_methods(["DELETE"])
-@permission_classes([StoreManagerPermission])
+@admin_access(SuperAdminPermission)
 def delete_product(request, product_id):
     try:
         product = Product.objects.get(id=product_id)
@@ -2525,7 +2531,7 @@ def delete_product(request, product_id):
         )
 
 @require_http_methods(["GET"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def view_orders(request):
 
     # orders = Order.objects.prefetch_related("items__product").all()
@@ -2570,7 +2576,7 @@ import json
 
 @require_http_methods(["POST"])
 @csrf_exempt
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def update_order_status(request, order_id):
 
     try:
@@ -2617,7 +2623,7 @@ def update_order_status(request, order_id):
         )
     
 @require_http_methods(["GET"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def order_detail_api(request, id):
     order = get_object_or_404(
         Order.objects.select_related("user")
@@ -2704,7 +2710,7 @@ def order_detail_api(request, id):
     
 @csrf_exempt
 @require_http_methods(["POST"])
-@permission_classes([StoreManagerPermission])
+@admin_access(SuperAdminPermission)
 def add_coupon(request):
     try:
         data = json.loads(request.body)
@@ -2741,7 +2747,7 @@ def add_coupon(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def view_coupons(request):
     coupons = Coupon.objects.all()
 
@@ -2761,7 +2767,7 @@ def view_coupons(request):
 
 @csrf_exempt
 @require_http_methods(["PUT"])
-@permission_classes([StoreManagerPermission])
+@admin_access(SuperAdminPermission)
 def update_coupon(request, coupon_id):
     try:
         coupon = Coupon.objects.get(id=coupon_id)
@@ -2789,7 +2795,7 @@ def update_coupon(request, coupon_id):
     
 @csrf_exempt
 @require_http_methods(["DELETE"])
-@permission_classes([StoreManagerPermission])
+@admin_access(SuperAdminPermission)
 def delete_coupon(request, coupon_id):
     try:
         coupon = Coupon.objects.get(id=coupon_id)
@@ -2889,7 +2895,7 @@ from django.views.decorators.http import require_http_methods
 
 
 @require_http_methods(["GET"])
-@permission_classes([StoreManagerPermission])
+@admin_access(SuperAdminPermission)
 def dashboard_stats(request):
 
     now = timezone.now()
@@ -3170,7 +3176,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 
 @csrf_exempt
 @require_http_methods(["POST"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def create_subcategory(request):
     try:
         data = json.loads(request.body)
@@ -3195,7 +3201,7 @@ def create_subcategory(request):
 from django.http import JsonResponse
 from .models import SubCategory
 
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def list_subcategories(request):
     if request.method != "GET":
         return JsonResponse({"error": "GET required"}, status=405)
@@ -3217,7 +3223,7 @@ import json
 
 @csrf_exempt
 @require_http_methods(["PUT", "PATCH"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def update_subcategory(request, pk):
     sub = get_object_or_404(SubCategory, pk=pk)
 
@@ -3246,7 +3252,7 @@ from django.views.decorators.http import require_http_methods
 
 @csrf_exempt
 @require_http_methods(["DELETE"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def delete_subcategory(request, pk):
     sub = get_object_or_404(SubCategory, pk=pk)
     sub.delete()
@@ -3319,22 +3325,36 @@ def admin_login(request):
     email = request.data.get("email")
     password = request.data.get("password")
 
-    # Find user
-    try:
-        user_obj = User.objects.get(email=email)
-
-    except User.DoesNotExist:
-        return Response(
-            {"error": "Invalid credentials"},
-            status=401
-        )
-
-    # Authenticate
-    user = authenticate(
-        request,
-        username=user_obj.username,
-        password=password
+    # Find user(s). auth.User.email is not unique, so several accounts may
+    # share it (a plain .get() would raise MultipleObjectsReturned -> 500).
+    # Only an account whose OWN password matches can ever be selected.
+    candidates = (
+        list(User.objects.filter(email=email).order_by("id"))
+        if email else []
     )
+
+    authenticated = []
+    for candidate in candidates:
+        matched = authenticate(
+            request,
+            username=candidate.username,
+            password=password
+        )
+        if matched is not None:
+            authenticated.append(matched)
+
+    staff_matches = [u for u in authenticated if u.is_staff]
+
+    if len(staff_matches) > 1:
+        # Several staff accounts share this email AND this password: we
+        # cannot tell which one is meant, so refuse rather than guess.
+        user = None
+    elif staff_matches:
+        user = staff_matches[0]
+    elif authenticated:
+        user = authenticated[0]   # non-staff -> "Access denied" below
+    else:
+        user = None
 
     if user is None:
         return Response(
@@ -3438,7 +3458,7 @@ from .models import Frame, Material
 # ---------------- FRAME ---------------- #
 @csrf_exempt
 @require_http_methods(["POST"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def create_frame(request):
 
     name = request.POST.get("name")
@@ -3458,7 +3478,7 @@ def create_frame(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def list_frames(request):
 
     frames = Frame.objects.all()
@@ -3477,7 +3497,7 @@ def list_frames(request):
 
 @csrf_exempt
 @require_http_methods(["POST"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def update_frame(request, frame_id):
 
     try:
@@ -3509,7 +3529,7 @@ def update_frame(request, frame_id):
 
 @csrf_exempt
 @require_http_methods(["DELETE"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def delete_frame(request, frame_id):
 
     try:
@@ -3525,7 +3545,7 @@ def delete_frame(request, frame_id):
 # ---------------- MATERIAL ---------------- #
 @csrf_exempt
 @require_http_methods(["POST"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def create_material(request):
 
     name = request.POST.get("name")
@@ -3545,6 +3565,7 @@ def create_material(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@admin_access(StoreManagerOrSuperAdmin)
 def list_materials(request):
 
     materials = Material.objects.all()
@@ -3569,6 +3590,7 @@ from rest_framework import status
 
 @api_view(["PUT"])
 @parser_classes([MultiPartParser, FormParser])
+@permission_classes([StoreManagerOrSuperAdmin])
 def update_material(request, material_id):
     try:
         material = Material.objects.get(id=material_id)
@@ -3619,7 +3641,7 @@ def update_material(request, material_id):
     
 @csrf_exempt
 @require_http_methods(["DELETE"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def delete_material(request, material_id):
 
     try:
@@ -3647,7 +3669,7 @@ import json
 
 @require_http_methods(["POST"])
 @csrf_exempt
-@permission_classes([StoreManagerPermission])
+@admin_access(SuperAdminPermission)
 def add_supplier(request):
     try:
         data = json.loads(request.body)
@@ -3682,7 +3704,7 @@ def add_supplier(request):
 
 
 @require_http_methods(["GET"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def supplier_list(request):
 
     suppliers = Supplier.objects.all().order_by("-id")
@@ -3708,7 +3730,7 @@ def supplier_list(request):
 from django.shortcuts import get_object_or_404
 
 @require_http_methods(["GET"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def supplier_detail(request, id):
 
     supplier = get_object_or_404(
@@ -3731,7 +3753,7 @@ def supplier_detail(request, id):
 
 @require_http_methods(["PUT"])
 @csrf_exempt
-@permission_classes([StoreManagerPermission])
+@admin_access(SuperAdminPermission)
 def update_supplier(request, id):
 
     try:
@@ -3791,7 +3813,7 @@ def update_supplier(request, id):
 
 @require_http_methods(["DELETE"])
 @csrf_exempt
-@permission_classes([StoreManagerPermission])
+@admin_access(SuperAdminPermission)
 def delete_supplier(request, id):
 
     supplier = get_object_or_404(
@@ -3807,7 +3829,7 @@ def delete_supplier(request, id):
 
 
 @api_view(["GET"])
-@permission_classes([StoreManagerPermission])
+@permission_classes([StoreManagerOrSuperAdmin])
 def get_notifications(request):
 
     notifications = Notification.objects.all()
@@ -3835,7 +3857,7 @@ from .utils import send_shipment_email
 
 
 @require_http_methods(["POST"])
-@permission_classes([StoreManagerPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 @csrf_exempt
 
 def create_shipment(request, order_id):
@@ -4134,7 +4156,7 @@ from .models import ShippingPartner
 
 # CREATE
 @api_view(["POST"])
-@permission_classes([StoreManagerPermission])
+@permission_classes([SuperAdminPermission])
 def create_shipping_partner(request):
 
     partner = ShippingPartner.objects.create(
@@ -4152,7 +4174,7 @@ def create_shipping_partner(request):
 
 # READ ALL
 @api_view(["GET"])
-@permission_classes([StoreManagerPermission])
+@permission_classes([StoreManagerOrSuperAdmin])
 def get_shipping_partners(request):
 
     partners = ShippingPartner.objects.all()
@@ -4176,7 +4198,7 @@ def get_shipping_partners(request):
 
 # READ SINGLE
 @api_view(["GET"])
-@permission_classes([StoreManagerPermission])
+@permission_classes([StoreManagerOrSuperAdmin])
 def get_shipping_partner(request, id):
 
     partner = get_object_or_404(
@@ -4199,7 +4221,7 @@ def get_shipping_partner(request, id):
 
 # UPDATE
 @api_view(["PUT"])
-@permission_classes([StoreManagerPermission])
+@permission_classes([SuperAdminPermission])
 def update_shipping_partner(request, id):
 
     partner = get_object_or_404(
@@ -4236,7 +4258,7 @@ def update_shipping_partner(request, id):
 
 # DELETE
 @api_view(["DELETE"])
-@permission_classes([StoreManagerPermission])
+@permission_classes([SuperAdminPermission])
 def delete_shipping_partner(request, id):
 
     partner = get_object_or_404(
