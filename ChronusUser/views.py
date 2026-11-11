@@ -1,6 +1,6 @@
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
-from rest_framework.decorators import APIView, api_view, permission_classes
+from rest_framework.decorators import APIView, api_view, authentication_classes, permission_classes
 from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
@@ -4339,9 +4339,34 @@ from rest_framework.response import Response
 from ChronasAdmin.models import ShippingPartner
 
 
+# @api_view(["GET"])
+# @permission_classes([AllowAny])
+# def user_shipping_partners(request):
+
+#     partners = ShippingPartner.objects.filter(
+#         availability="available"
+#     ).order_by("name")
+
+#     data = []
+
+#     for partner in partners:
+#         data.append({
+#             "id": partner.id,
+#             "name": partner.name,
+#             "shipping_charge": partner.shipping_charge,
+#             "estimated_delivery": partner.estimated_delivery,
+#             "availability": partner.availability,
+#         })
+
+#     return Response(data)
+
+
 @api_view(["GET"])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def user_shipping_partners(request):
+
+    currency = (request.query_params.get("currency") or "AED").upper()
 
     partners = ShippingPartner.objects.filter(
         availability="available"
@@ -4353,7 +4378,7 @@ def user_shipping_partners(request):
         data.append({
             "id": partner.id,
             "name": partner.name,
-            "shipping_charge": partner.shipping_charge,
+            "shipping_charge": convert_price(partner.shipping_charge, currency),
             "estimated_delivery": partner.estimated_delivery,
             "availability": partner.availability,
         })
