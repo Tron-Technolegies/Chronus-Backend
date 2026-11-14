@@ -218,6 +218,7 @@ class Order(models.Model):
     shipping_partner = models.ForeignKey("ShippingPartner",on_delete=models.SET_NULL,null=True,blank=True)
     shipping_charge = models.DecimalField(max_digits=12,decimal_places=2,default=0)
 
+    subtotal = models.DecimalField(max_digits=12,decimal_places=2,default=0)
 
     def __str__(self):
         return f"Order #{self.id}"
