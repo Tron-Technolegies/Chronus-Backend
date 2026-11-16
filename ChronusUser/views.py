@@ -1,3 +1,5 @@
+import json
+
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import APIView, api_view, authentication_classes, permission_classes
@@ -2380,46 +2382,103 @@ from rest_framework.response import Response
 from ChronusUser.models import Order
 from ChronasAdmin.models import Notification
 
-
 class ZiinaWebhook(APIView):
 
     permission_classes = [AllowAny]
     authentication_classes = []
 
-    def verify_signature(self, request):
-
-        signature = request.headers.get("X-Hmac-Signature")
+    def verify_signature(self, raw_body, signature):
 
         if not signature:
             print("Ziina signature missing", flush=True)
             return False
 
+        if not settings.ZIINA_WEBHOOK_SECRET:
+            print("Ziina webhook secret is not configured", flush=True)
+            return False
+
         expected_signature = hmac.new(
             settings.ZIINA_WEBHOOK_SECRET.encode(),
-            request.body,
+            raw_body,
             hashlib.sha256
         ).hexdigest()
 
-        return hmac.compare_digest(signature, expected_signature)
+        return hmac.compare_digest(
+            signature,
+            expected_signature
+        )
 
     def post(self, request):
 
-        print("========== ZIINA WEBHOOK ==========", flush=True)
-        print("REQUEST:", request.data, flush=True)
+        print(
+            "========== ZIINA WEBHOOK ==========",
+            flush=True
+        )
 
-        # Always verify signature in production
-        if not self.verify_signature(request):
+        # ---------------------------------
+        # 1. Read raw request body FIRST
+        # ---------------------------------
+
+        raw_body = request.body
+
+        # ---------------------------------
+        # 2. Verify signature
+        # ---------------------------------
+
+        signature = request.headers.get(
+            "X-Hmac-Signature"
+        )
+
+        if not self.verify_signature(
+            raw_body,
+            signature
+        ):
+            print(
+                "ZIINA WEBHOOK SIGNATURE INVALID",
+                flush=True
+            )
+
             return Response(
-                {
-                    "error": "Invalid signature"
-                },
+                {"error": "Invalid signature"},
                 status=401
             )
 
-        event = request.data.get("event")
+        print(
+            "ZIINA SIGNATURE VERIFIED",
+            flush=True
+        )
 
-        # Ignore other webhook events
+        # ---------------------------------
+        # 3. Parse JSON after verification
+        # ---------------------------------
+
+        try:
+            data = json.loads(
+                raw_body.decode("utf-8")
+            )
+
+        except (json.JSONDecodeError, UnicodeDecodeError):
+
+            return Response(
+                {"error": "Invalid JSON"},
+                status=400
+            )
+
+        # Avoid logging complete customer/payment data
+        event = data.get("event")
+
+        print(
+            "ZIINA WEBHOOK EVENT:",
+            event,
+            flush=True
+        )
+
+        # ---------------------------------
+        # 4. Check event type
+        # ---------------------------------
+
         if event != "payment_intent.status.updated":
+
             return Response(
                 {
                     "success": True,
@@ -2428,187 +2487,135 @@ class ZiinaWebhook(APIView):
                 status=200
             )
 
-        payment = request.data.get("data", {})
+        # ---------------------------------
+        # 5. Extract payment information
+        # ---------------------------------
+
+        payment = data.get("data", {})
 
         payment_id = payment.get("id")
         payment_status = payment.get("status")
 
-        print("Payment ID:", payment_id, flush=True)
-        print("Payment Status:", payment_status, flush=True)
+        print(
+            "ZIINA PAYMENT ID:",
+            payment_id,
+            flush=True
+        )
+
+        print(
+            "ZIINA PAYMENT STATUS:",
+            payment_status,
+            flush=True
+        )
+
+        if not payment_id:
+            return Response(
+                {"error": "Payment ID missing"},
+                status=400
+            )
+
+        # ---------------------------------
+        # 6. Find corresponding order
+        # ---------------------------------
 
         order = Order.objects.filter(
             payment_id=payment_id
         ).first()
 
         if not order:
+
+            print(
+                "ORDER NOT FOUND FOR ZIINA PAYMENT:",
+                payment_id,
+                flush=True
+            )
+
             return Response(
-                {
-                    "error": "Order not found"
-                },
+                {"error": "Order not found"},
                 status=404
             )
 
-        # Prevent duplicate processing
+        # ---------------------------------
+        # 7. Process payment status
+        # ---------------------------------
+
         if payment_status == "completed":
 
             if order.payment_status != "paid":
 
                 order.payment_status = "paid"
-                order.save(update_fields=["payment_status"])
+
+                order.save(
+                    update_fields=["payment_status"]
+                )
 
                 Notification.objects.create(
                     title="Payment Received",
                     message=f"Ziina payment received for Order #{order.id}"
                 )
 
-                print(f"Order {order.id} marked as PAID", flush=True)
+                print(
+                    f"ORDER {order.id} MARKED AS PAID",
+                    flush=True
+                )
 
         elif payment_status == "failed":
 
             if order.payment_status != "failed":
 
                 order.payment_status = "failed"
-                order.save(update_fields=["payment_status"])
 
-                print(f"Order {order.id} marked as FAILED", flush=True)
+                order.save(
+                    update_fields=["payment_status"]
+                )
+
+                print(
+                    f"ORDER {order.id} MARKED AS FAILED",
+                    flush=True
+                )
 
         elif payment_status == "pending":
 
             if order.payment_status != "pending":
 
                 order.payment_status = "pending"
-                order.save(update_fields=["payment_status"])
 
-                print(f"Order {order.id} marked as PENDING", flush=True)
+                order.save(
+                    update_fields=["payment_status"]
+                )
+
+                print(
+                    f"ORDER {order.id} MARKED AS PENDING",
+                    flush=True
+                )
 
         elif payment_status == "requires_user_action":
 
-            print("Customer action required", flush=True)
+            print(
+                "CUSTOMER ACTION REQUIRED",
+                flush=True
+            )
 
         elif payment_status == "requires_payment_instrument":
 
-            print("Waiting for payment instrument", flush=True)
+            print(
+                "WAITING FOR PAYMENT INSTRUMENT",
+                flush=True
+            )
+
+        else:
+
+            print(
+                "UNHANDLED ZIINA PAYMENT STATUS:",
+                payment_status,
+                flush=True
+            )
 
         return Response(
-            {
-                "success": True
-            },
+            {"success": True},
             status=200
         )
-# LOCAL TESTING FUNCTION BY SKIPPING SIGNATURE VERIFICATION
 
-# class ZiinaWebhook(APIView):
-
-#     permission_classes = [AllowAny]
-#     authentication_classes = []
-
-#     def verify_signature(self, request):
-
-#         signature = request.headers.get("X-Hmac-Signature")
-
-#         if not signature:
-#             print("Signature Missing", flush=True)
-#             return False
-
-#         expected_signature = hmac.new(
-#             settings.ZIINA_WEBHOOK_SECRET.encode(),
-#             request.body,
-#             hashlib.sha256
-#         ).hexdigest()
-
-#         return hmac.compare_digest(signature, expected_signature)
-
-#     def post(self, request):
-
-#         print("========== ZIINA WEBHOOK ==========", flush=True)
-#         print("REQUEST:", request.data, flush=True)
-
-#         # Skip signature verification in DEBUG mode
-#         if settings.DEBUG:
-#             print("DEBUG MODE - Signature verification skipped", flush=True)
-#         else:
-#             if not self.verify_signature(request):
-#                 return Response(
-#                     {
-#                         "error": "Invalid signature"
-#                     },
-#                     status=401
-#                 )
-
-#         event = request.data.get("event")
-
-#         if event != "payment_intent.status.updated":
-#             return Response(
-#                 {
-#                     "success": True,
-#                     "message": "Ignored event"
-#                 },
-#                 status=200
-#             )
-
-#         payment = request.data.get("data", {})
-
-#         payment_id = payment.get("id")
-#         payment_status = payment.get("status")
-
-#         print("Payment ID:", payment_id, flush=True)
-#         print("Payment Status:", payment_status, flush=True)
-
-#         order = Order.objects.filter(
-#             payment_id=payment_id
-#         ).first()
-
-#         if not order:
-#             return Response(
-#                 {
-#                     "error": "Order not found"
-#                 },
-#                 status=404
-#             )
-
-#         if payment_status == "completed":
-
-#             if order.payment_status != "paid":
-
-#                 order.payment_status = "paid"
-#                 order.save(update_fields=["payment_status"])
-
-#                 Notification.objects.create(
-#                     title="Payment Received",
-#                     message=f"Ziina payment received for Order #{order.id}"
-#                 )
-
-#                 print("Order marked as PAID", flush=True)
-
-#         elif payment_status == "failed":
-
-#             order.payment_status = "failed"
-#             order.save(update_fields=["payment_status"])
-
-#             print("Order marked as FAILED", flush=True)
-
-#         elif payment_status == "pending":
-
-#             order.payment_status = "pending"
-#             order.save(update_fields=["payment_status"])
-
-#             print("Order marked as PENDING", flush=True)
-
-#         elif payment_status == "requires_payment_instrument":
-
-#             print("Waiting for payment method...", flush=True)
-
-#         elif payment_status == "requires_user_action":
-
-#             print("Waiting for customer action...", flush=True)
-
-#         return Response(
-#             {
-#                 "success": True
-#             },
-#             status=200
-#         )
-# user/views.py
 
 from django.http import JsonResponse
 from ChronasAdmin.models import FineArtSize, Frame, Material
