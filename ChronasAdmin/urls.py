@@ -21,7 +21,7 @@ urlpatterns = [
 
     path('view_orders/', views.view_orders, name='view_orders'),
     path('update_order/<int:order_id>/', views.update_order_status, name='update_order_status'),
-    path('order_detail_api/<int:id>', views.order_detail_api, name='order_detail_api'),
+    path('order_detail_api/<int:id>/', views.order_detail_api, name='order_detail_api'),
 
     path('add_coupon/', views.add_coupon, name='add_coupon'),
     path('view_coupons/', views.view_coupons, name='view_coupons'),
