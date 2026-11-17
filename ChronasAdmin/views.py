@@ -2663,6 +2663,8 @@ def order_detail_api(request, id):
         "date": order.created_at,
         "status": order.status,
         "payment_status": order.payment_status,
+        "subtotal": float(order.subtotal or 0),
+        "shipping_charge": float(order.shipping_charge or 0),
         "total_price": float(order.total_amount),
         "tracking_link": order.tracking_link,
         "tracking_number": order.tracking_number,

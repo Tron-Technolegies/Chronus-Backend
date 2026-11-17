@@ -1,3 +1,4 @@
+from datetime import timezone
 import json
 
 from django.http import JsonResponse
@@ -3020,9 +3021,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from django.conf import settings
-
+from decimal import Decimal
 from ChronasAdmin.models import Order
-
+from datetime import timezone as dt_timezone
 
 class CreateTabbyPayment(APIView):
 
@@ -3135,7 +3136,23 @@ class CreateTabbyPayment(APIView):
                 "Content-Type": "application/json"
 
             }
+            shipping_amount = order.shipping_charge or Decimal("0.00")
+            # Get actual customer registration date
+            if order.user:
+                registered_since = order.user.date_joined
+            else:
+                registered_since = order.created_at
 
+            # Convert to UTC ISO 8601 format
+            if timezone.is_naive(registered_since):
+                registered_since = timezone.make_aware(registered_since)
+
+            registered_since = (
+                registered_since
+                .astimezone(dt_timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+)
 
             payload = {
 
@@ -3174,6 +3191,9 @@ class CreateTabbyPayment(APIView):
                         "reference_id": str(
                             order.id
                         ),
+                        "shipping_amount": str(shipping_amount),
+                        "tax_amount": "0.00",
+                        "discount_amount": "0.00",
 
 
                         "items": [
@@ -3224,7 +3244,7 @@ class CreateTabbyPayment(APIView):
 
                     "buyer_history": {
 
-                        "registered_since": "2024-01-01",
+                        "registered_since":  registered_since,
 
                         "loyalty_level": 0
 
@@ -3465,11 +3485,13 @@ def capture_tabby_payment(order):
         "Content-Type": "application/json",
     }
 
+    shipping_amount = order.shipping_charge or Decimal("0.00")
+
     payload = {
         "amount": str(order.total_amount),
         "reference_id": f"order-{order.id}-capture",
+        "shipping_amount": str(shipping_amount),
         "tax_amount": "0.00",
-        "shipping_amount": "0.00",
         "discount_amount": "0.00",
     }
 
