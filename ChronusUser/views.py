@@ -1,4 +1,4 @@
-from datetime import timezone
+
 import json
 
 from django.http import JsonResponse
