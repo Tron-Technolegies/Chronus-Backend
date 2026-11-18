@@ -3341,13 +3341,31 @@ class CreateTabbyPayment(APIView):
                 )
 
            
-            # # Save Tabby payment ID
-            # payment_id = data.get("id")
+            # Handle Tabby pre-scoring rejection
+            session_status = str(data.get("status", "")).lower()
 
-            # if payment_id:
-            #     order.payment_id = payment_id
-            #     order.save(update_fields=["payment_id"])
-            #     print("TABBY PAYMENT ID:", payment_id, flush=True)
+            if session_status == "rejected":
+                return Response(
+                    {
+                        "status": "rejected",
+                        "code": "TABBY_PRE_SCORING_REJECTED",
+                        "message": (
+                            "Sorry, Tabby is unable to approve this purchase. "
+                            "Please use an alternative payment method for your order."
+                        )
+                    },
+                    status=200
+                )
+
+            if session_status not in ["created", "approved"]:
+                return Response(
+                    {
+                        "status": "error",
+                        "code": "TABBY_SESSION_NOT_READY",
+                        "message": "Unable to initiate Tabby checkout."
+                    },
+                    status=502
+                )
 
             tabby_payment_id = (data.get("payment", {}).get("id"))
             if not tabby_payment_id:
@@ -3411,6 +3429,15 @@ class CreateTabbyPayment(APIView):
 
                 payment_url = data.get(
                     "web_url"
+                )
+            if not payment_url:
+                return Response(
+                    {
+                        "status": "error",
+                        "code": "TABBY_CHECKOUT_URL_MISSING",
+                        "message": "Unable to retrieve Tabby checkout URL."
+                    },
+                    status=502
                 )
 
 
