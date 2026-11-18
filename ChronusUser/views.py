@@ -2241,6 +2241,7 @@ class CreateZiinaPayment(APIView):
 
 
                 "message": f"Order {order.id}",
+                "test": True,
 
 
                 "metadata": {
