@@ -2305,8 +2305,15 @@ class CreateZiinaPayment(APIView):
             print("ZIINA PAYMENT ID:", payment_id, flush=True)
             
             
-            order.payment_id = payment_id
-            order.save(update_fields=["payment_id"])
+            # order.payment_id = payment_id
+            # order.save(update_fields=["payment_id"])
+
+            PaymentAttempt.objects.create(
+                order=order,
+                gateway="ziina",
+                payment_id=payment_id,
+                status="pending"
+            )
 
 
             return Response(
@@ -2375,13 +2382,20 @@ from ChronasAdmin.models import Notification
 from .models import Order
 import hashlib
 import hmac
-
+from django.db import transaction
 from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from ChronusUser.models import Order
+from ChronasAdmin.models import Notification
+import json
+import hashlib
+import hmac
+
+
+
 from ChronasAdmin.models import Notification
 
 class ZiinaWebhook(APIView):
@@ -2520,9 +2534,28 @@ class ZiinaWebhook(APIView):
         # 6. Find corresponding order
         # ---------------------------------
 
-        order = Order.objects.filter(
-            payment_id=payment_id
+        # order = Order.objects.filter(
+        #     payment_id=payment_id
+        # ).first()
+        payment_attempt = PaymentAttempt.objects.select_related(
+            "order"
+        ).filter(
+            payment_id=payment_id,
+            gateway="ziina"
         ).first()
+
+        if not payment_attempt:
+            print(
+                "PAYMENT ATTEMPT NOT FOUND:",
+                payment_id,
+                flush=True
+            )
+            return Response(
+                {"error": "Payment attempt not found"},
+                status=404
+            )
+
+        order = payment_attempt.order
 
         if not order:
 
@@ -2540,70 +2573,152 @@ class ZiinaWebhook(APIView):
         # ---------------------------------
         # 7. Process payment status
         # ---------------------------------
+        # if payment_status == "completed":
+
+        #     payment_attempt.status = "completed"
+        #     payment_attempt.save(update_fields=["status"])
+
+        #     if order.payment_status != "paid":
+        #         order.payment_status = "paid"
+        #         order.save(update_fields=["payment_status"])
+
+        #         Notification.objects.create(
+        #             title="Payment Received",
+        #             message=f"Ziina payment received for Order #{order.id}"
+        #         )
+
+        #         print(
+        #             f"ORDER {order.id} MARKED AS PAID",
+        #             flush=True
+        #         )
+
+        # elif payment_status == "failed":
+
+        #     payment_attempt.status = "failed"
+        #     payment_attempt.save(update_fields=["status"])
+
+        #     print(
+        #         f"ZIINA PAYMENT ATTEMPT FAILED FOR ORDER {order.id}",
+        #         flush=True
+        #     )
+
+        # elif payment_status == "pending":
+
+        #     payment_attempt.status = "pending"
+        #     payment_attempt.save(update_fields=["status"])
+
+        # elif payment_status == "requires_user_action":
+
+        #     print("CUSTOMER ACTION REQUIRED", flush=True)
+
+        # elif payment_status == "requires_payment_instrument":
+
+        #     print("WAITING FOR PAYMENT INSTRUMENT", flush=True)
+
+        # else:
+
+        #     print(
+        #         "UNHANDLED ZIINA PAYMENT STATUS:",
+        #         payment_status,
+        #         flush=True
+        #     )
+
+                # ---------------------------------
+        # 7. Process payment status
+        # ---------------------------------
 
         if payment_status == "completed":
 
-            if order.payment_status != "paid":
+            with transaction.atomic():
 
-                order.payment_status = "paid"
-
-                order.save(
-                    update_fields=["payment_status"]
+                locked_order = Order.objects.select_for_update().get(
+                    pk=order.pk
                 )
 
-                Notification.objects.create(
-                    title="Payment Received",
-                    message=f"Ziina payment received for Order #{order.id}"
+                locked_attempt = PaymentAttempt.objects.select_for_update().get(
+                    pk=payment_attempt.pk
                 )
 
-                print(
-                    f"ORDER {order.id} MARKED AS PAID",
-                    flush=True
-                )
+                # Gateway confirms this payment really completed
+                locked_attempt.status = "completed"
+                locked_attempt.save(update_fields=["status"])
+
+                # Order stock was already restored or order expired/failed
+                if (
+                    locked_order.stock_restored
+                    or locked_order.payment_status == "failed"
+                ):
+                    print(
+                        f"WARNING: Ziina payment completed after order failure/stock restoration. "
+                        f"Order: {locked_order.id}, Payment: {payment_id}",
+                        flush=True
+                    )
+
+                # Another payment gateway already paid this order
+                elif locked_order.payment_status == "paid":
+
+                    if locked_order.payment_id != payment_id:
+                        print(
+                            f"WARNING: MULTIPLE SUCCESSFUL PAYMENTS FOR ORDER "
+                            f"{locked_order.id}. Existing payment: "
+                            f"{locked_order.payment_id}, Ziina payment: {payment_id}",
+                            flush=True
+                        )
+
+                    else:
+                        print(
+                            f"ZIINA PAYMENT ALREADY PROCESSED FOR ORDER {locked_order.id}",
+                            flush=True
+                        )
+
+                else:
+                    # This is the first successful payment for this order
+                    locked_order.payment_status = "paid"
+                    locked_order.status = "processing"
+                    locked_order.payment_id = payment_id
+
+                    locked_order.save(
+                        update_fields=[
+                            "payment_status",
+                            "status",
+                            "payment_id"
+                        ]
+                    )
+
+                    Notification.objects.create(
+                        title="Payment Received",
+                        message=f"Ziina payment received for Order #{locked_order.id}"
+                    )
+
+                    print(
+                        f"ORDER {locked_order.id} MARKED AS PAID BY ZIINA",
+                        flush=True
+                    )
 
         elif payment_status == "failed":
 
-            if order.payment_status != "failed":
+            if payment_attempt.status != "completed":
+                payment_attempt.status = "failed"
+                payment_attempt.save(update_fields=["status"])
 
-                order.payment_status = "failed"
-
-                order.save(
-                    update_fields=["payment_status"]
-                )
-
-                print(
-                    f"ORDER {order.id} MARKED AS FAILED",
-                    flush=True
-                )
+            print(
+                f"ZIINA PAYMENT ATTEMPT FAILED FOR ORDER {order.id}",
+                flush=True
+            )
 
         elif payment_status == "pending":
 
-            if order.payment_status != "pending":
-
-                order.payment_status = "pending"
-
-                order.save(
-                    update_fields=["payment_status"]
-                )
-
-                print(
-                    f"ORDER {order.id} MARKED AS PENDING",
-                    flush=True
-                )
+            if payment_attempt.status not in ["completed", "failed"]:
+                payment_attempt.status = "pending"
+                payment_attempt.save(update_fields=["status"])
 
         elif payment_status == "requires_user_action":
 
-            print(
-                "CUSTOMER ACTION REQUIRED",
-                flush=True
-            )
+            print("CUSTOMER ACTION REQUIRED", flush=True)
 
         elif payment_status == "requires_payment_instrument":
 
-            print(
-                "WAITING FOR PAYMENT INSTRUMENT",
-                flush=True
-            )
+            print("WAITING FOR PAYMENT INSTRUMENT", flush=True)
 
         else:
 
@@ -3263,20 +3378,11 @@ class CreateTabbyPayment(APIView):
 
 
                 "merchant_urls": {
+                        "success": "https://chronosgallery.com/payment-success?gateway=tabby",
+                        "cancel": "https://chronosgallery.com/payment-cancel?gateway=tabby",
+                        "failure": "https://chronosgallery.com/payment-failure?gateway=tabby"
+                    }
 
-
-                    "success":
-                    "https://chronosgallery.com/payment-success",
-
-
-                    "cancel":
-                    "https://chronosgallery.com/payment-cancel",
-
-
-                    "failure":
-                    "https://chronosgallery.com/payment-failure"
-
-                }
 
             }
 
@@ -3346,6 +3452,7 @@ class CreateTabbyPayment(APIView):
             session_status = str(data.get("status", "")).lower()
 
             if session_status == "rejected":
+                
                 return Response(
                     {
                         "status": "rejected",
@@ -3381,8 +3488,14 @@ class CreateTabbyPayment(APIView):
                     },
                     status=500
                 )
-            order.payment_id = tabby_payment_id
-            order.save(update_fields=["payment_id"])
+            # order.payment_id = tabby_payment_id
+            # order.save(update_fields=["payment_id"])
+            PaymentAttempt.objects.create(
+                order=order,
+                gateway="tabby",
+                payment_id=tabby_payment_id,
+                status="pending"
+)
             print(
                     "TABBY PAYMENT ID:",
                     tabby_payment_id,
@@ -3494,22 +3607,26 @@ class CreateTabbyPayment(APIView):
             )
 
 
-def capture_tabby_payment(order):
+def capture_tabby_payment(order, payment_id):
     """
     Capture an authorized Tabby payment.
     Returns (success, response_data).
     """
 
-    if not order.payment_id:
+    # if not order.payment_id:
+    #     return False, {
+    #         "error": "Order does not have a Tabby payment ID"
+    #     }
+    if not payment_id:
         return False, {
-            "error": "Order does not have a Tabby payment ID"
+            "error": "Tabby payment ID is missing"
         }
 
-    capture_url = (
-        f"https://api.tabby.ai/api/v2/payments/"
-        f"{order.payment_id}/captures"
-    )
-
+    # capture_url = (
+    #     f"https://api.tabby.ai/api/v2/payments/"
+    #     f"{order.payment_id}/captures"
+    # )
+    capture_url = f"https://api.tabby.ai/api/v2/payments/{payment_id}/captures"
     headers = {
         "Authorization": f"Bearer {settings.TABBY_SECRET_KEY}",
         "Content-Type": "application/json",
@@ -3588,6 +3705,7 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes
 from django.core.mail import send_mail
 from django.contrib.auth.models import User
+from django.db import transaction
 
 class TabbyWebhook(APIView):
 
@@ -3679,9 +3797,29 @@ class TabbyWebhook(APIView):
             # 3. Find Order
             # ==================================================
 
-            order = Order.objects.filter(
-                payment_id=payment_id
+            # order = Order.objects.filter(
+            #     payment_id=payment_id
+            # ).first()
+
+            payment_attempt = PaymentAttempt.objects.select_related(
+                "order"
+            ).filter(
+                payment_id=payment_id,
+                gateway="tabby"
             ).first()
+
+            if not payment_attempt:
+                print(
+                    "TABBY PAYMENT ATTEMPT NOT FOUND:",
+                    payment_id,
+                    flush=True
+                )
+                return Response(
+                    {"message": "Payment attempt not found"},
+                    status=200
+                )
+
+            order = payment_attempt.order
 
 
             if not order:
@@ -3803,56 +3941,70 @@ class TabbyWebhook(APIView):
 
             if payment_status == "CLOSED":
 
-                print(
-                    "TABBY PAYMENT IS CLOSED",
-                    flush=True
-                )
+                with transaction.atomic():
 
+                    locked_order = Order.objects.select_for_update().get(
+                        pk=order.pk
+                    )
 
-                # Idempotency:
-                # Don't process the same successful payment twice.
+                    locked_attempt = PaymentAttempt.objects.select_for_update().get(
+                        pk=payment_attempt.pk
+                    )
 
-                if order.payment_status == "paid":
+                    if locked_order.stock_restored or locked_order.payment_status == "failed":
+
+                        print(
+                            f"WARNING: Tabby payment CLOSED after stock restoration. "
+                            f"Order: {locked_order.id}, Payment: {payment_id}",
+                            flush=True
+                        )
+
+                        return Response(
+                            {
+                                "status": "payment_reconciliation_required",
+                                "order_id": locked_order.id
+                            },
+                            status=200
+                        )
+
+                    if locked_order.payment_status == "paid":
+
+                        locked_attempt.status = "completed"
+                        locked_attempt.save(update_fields=["status"])
+
+                        if locked_order.payment_id != payment_id:
+                            print(
+                                f"WARNING: Another payment already paid Order "
+                                f"{locked_order.id}. Tabby Payment: {payment_id}, "
+                                f"Winning Payment: {locked_order.payment_id}",
+                                flush=True
+                            )
+
+                        return Response(
+                            {"status": "already_processed"},
+                            status=200
+                        )
+
+                    locked_order.payment_status = "paid"
+                    locked_order.status = "processing"
+                    locked_order.payment_id = payment_id
+
+                    locked_order.save(
+                        update_fields=[
+                            "payment_status",
+                            "status",
+                            "payment_id"
+                        ]
+                    )
+
+                    locked_attempt.status = "completed"
+                    locked_attempt.save(update_fields=["status"])
 
                     print(
-                        "ORDER ALREADY MARKED AS PAID:",
-                        order.id,
+                        "ORDER PAYMENT MARKED AS PAID:",
+                        locked_order.id,
                         flush=True
                     )
-
-                    return Response(
-                        {
-                            "status": "already_processed"
-                        },
-                        status=200
-                    )
-
-
-                order.payment_status = "paid"
-
-                order.status = "processing"
-
-
-                order.save(
-                    update_fields=[
-                        "payment_status",
-                        "status"
-                    ]
-                )
-
-
-                print(
-                    "ORDER PAYMENT MARKED AS PAID:",
-                    order.id,
-                    flush=True
-                )
-
-                print(
-                    "ORDER STATUS:",
-                    order.status,
-                    flush=True
-                )
-
 
             # ==================================================
             # 7. Payment AUTHORIZED
@@ -3860,21 +4012,45 @@ class TabbyWebhook(APIView):
 
             elif payment_status == "AUTHORIZED":
 
+                if order.stock_restored or order.payment_status == "failed":
+
+                    print(
+                        f"WARNING: Tabby authorization received after stock restoration. "
+                        f"Order: {order.id}",
+                        flush=True
+                    )
+
+                    return Response(
+                        {
+                            "status": "order_already_failed",
+                            "order_id": order.id
+                        },
+                        status=200
+                    )
+                if order.payment_status == "paid":
+                    return Response(
+                        {"status": "order_already_paid"},
+                        status=200
+        )
+  
+
                 print(
                     "TABBY PAYMENT AUTHORIZED:",
                     order.id,
                     flush=True
                 )
 
+                payment_attempt.status = "authorized"
+                payment_attempt.save(update_fields=["status"])
 
                 # ----------------------------------------------
                 # Capture payment
                 # ----------------------------------------------
 
-                capture_success, capture_data = (
-                    capture_tabby_payment(order)
+                capture_success, capture_data = capture_tabby_payment(
+                    order,
+                    payment_attempt.payment_id
                 )
-
 
                 if not capture_success:
 
@@ -3886,15 +4062,11 @@ class TabbyWebhook(APIView):
 
                     return Response(
                         {
-                            "error":
-                                "Tabby capture failed",
-
-                            "details":
-                                capture_data
+                            "error": "Tabby capture failed",
+                            "details": capture_data
                         },
                         status=500
                     )
-
 
                 print(
                     "TABBY CAPTURE SUCCESSFUL:",
@@ -3902,23 +4074,20 @@ class TabbyWebhook(APIView):
                     flush=True
                 )
 
-
                 # ----------------------------------------------
                 # Verify payment again after capture
                 # ----------------------------------------------
 
                 verify_url = (
                     f"https://api.tabby.ai/api/v2/payments/"
-                    f"{order.payment_id}"
+                    f"{payment_attempt.payment_id}"
                 )
-
 
                 verify_response = requests.get(
                     verify_url,
                     headers=headers,
                     timeout=20
                 )
-
 
                 print(
                     "TABBY POST-CAPTURE VERIFY:",
@@ -3932,23 +4101,16 @@ class TabbyWebhook(APIView):
                     flush=True
                 )
 
-
                 if verify_response.status_code != 200:
 
                     return Response(
                         {
-                            "error":
-                                "Unable to verify payment "
-                                "after capture"
+                            "error": "Unable to verify payment after capture"
                         },
                         status=500
                     )
 
-
-                updated_payment = (
-                    verify_response.json()
-                )
-
+                updated_payment = verify_response.json()
 
                 updated_status = (
                     updated_payment
@@ -3956,13 +4118,11 @@ class TabbyWebhook(APIView):
                     .upper()
                 )
 
-
                 print(
                     "TABBY STATUS AFTER CAPTURE:",
                     updated_status,
                     flush=True
                 )
-
 
                 # ----------------------------------------------
                 # Payment successfully captured
@@ -3970,35 +4130,73 @@ class TabbyWebhook(APIView):
 
                 if updated_status == "CLOSED":
 
-                    if order.payment_status != "paid":
+                    with transaction.atomic():
 
-                        order.payment_status = "paid"
-
-                        order.status = "processing"
-
-
-                        order.save(
-                            update_fields=[
-                                "payment_status",
-                                "status"
-                            ]
+                        locked_order = Order.objects.select_for_update().get(
+                            pk=order.pk
                         )
 
-
-                        print(
-                            "ORDER MARKED AS PAID:",
-                            order.id,
-                            flush=True
+                        locked_attempt = PaymentAttempt.objects.select_for_update().get(
+                            pk=payment_attempt.pk
                         )
 
-                    else:
+                        if locked_order.stock_restored or locked_order.payment_status == "failed":
 
-                        print(
-                            "ORDER WAS ALREADY PAID:",
-                            order.id,
-                            flush=True
-                        )
+                            print(
+                                f"WARNING: Tabby captured after order failure. "
+                                f"Order: {locked_order.id}, Payment: {payment_id}",
+                                flush=True
+                            )
 
+                            return Response(
+                                {
+                                    "status": "payment_reconciliation_required",
+                                    "order_id": locked_order.id
+                                },
+                                status=200
+                            )
+
+                        if locked_order.payment_status == "paid":
+
+                            locked_attempt.status = "completed"
+                            locked_attempt.save(update_fields=["status"])
+
+                            if locked_order.payment_id != payment_id:
+                                print(
+                                    f"WARNING: Another payment already paid Order "
+                                    f"{locked_order.id}. Tabby Payment: {payment_id}, "
+                                    f"Winning Payment: {locked_order.payment_id}",
+                                    flush=True
+                                )
+
+                            print(
+                                "ORDER WAS ALREADY PAID:",
+                                locked_order.id,
+                                flush=True
+                            )
+
+                        else:
+
+                            locked_order.payment_status = "paid"
+                            locked_order.status = "processing"
+                            locked_order.payment_id = payment_id
+
+                            locked_order.save(
+                                update_fields=[
+                                    "payment_status",
+                                    "status",
+                                    "payment_id"
+                                ]
+                            )
+
+                            locked_attempt.status = "completed"
+                            locked_attempt.save(update_fields=["status"])
+
+                            print(
+                                "ORDER MARKED AS PAID:",
+                                locked_order.id,
+                                flush=True
+                            )
 
                 else:
 
@@ -4010,15 +4208,11 @@ class TabbyWebhook(APIView):
 
                     return Response(
                         {
-                            "status":
-                                "capture_pending",
-
-                            "payment_status":
-                                updated_status
+                            "status": "capture_pending",
+                            "payment_status": updated_status
                         },
                         status=200
                     )
-
 
             # ==================================================
             # 8. Payment rejected
@@ -4026,57 +4220,22 @@ class TabbyWebhook(APIView):
 
             elif payment_status == "REJECTED":
 
-                print(
-                    "TABBY PAYMENT REJECTED:",
-                    order.id,
-                    flush=True
-                )
+                print("TABBY PAYMENT REJECTED:", order.id, flush=True)
 
-
-                order.payment_status = "failed"
-
-
-                order.save(
-                    update_fields=[
-                        "payment_status"
-                    ]
-                )
-
-
-                print(
-                    "ORDER PAYMENT MARKED AS FAILED",
-                    flush=True
-                )
-
+                payment_attempt.status = "rejected"
+                payment_attempt.save(update_fields=["status"])
 
             # ==================================================
             # 9. Payment expired
             # ==================================================
 
+           
             elif payment_status == "EXPIRED":
 
-                print(
-                    "TABBY PAYMENT EXPIRED:",
-                    order.id,
-                    flush=True
-                )
+                print("TABBY PAYMENT EXPIRED:", order.id, flush=True)
 
-
-                order.payment_status = "failed"
-
-
-                order.save(
-                    update_fields=[
-                        "payment_status"
-                    ]
-                )
-
-
-                print(
-                    "ORDER PAYMENT MARKED AS FAILED",
-                    flush=True
-                )
-
+                payment_attempt.status = "expired"
+                payment_attempt.save(update_fields=["status"])
 
             # ==================================================
             # 10. Other status
@@ -4422,3 +4581,68 @@ def user_shipping_partners(request):
 
 
 
+
+from django.db import transaction
+from django.db.models import F
+from django.core.exceptions import ValidationError
+
+
+def release_order_stock(order_id):
+
+    with transaction.atomic():
+
+        order = Order.objects.select_for_update().get(id=order_id)
+
+        # Do not restore stock for paid orders
+        if order.payment_status == "paid":
+            print(f"Order {order.id} is already paid", flush=True)
+            return False
+
+        # Prevent duplicate restoration
+        if order.stock_restored:
+            print(f"Stock already restored for order {order.id}", flush=True)
+            return False
+
+        order_items = order.items.select_related(
+            "product",
+            "variant"
+        ).all()
+
+        for item in order_items:
+
+            if item.product is None:
+                raise ValidationError(
+                    f"Product missing for order item {item.id}"
+                )
+
+            if item.product.product_type == "variant":
+
+                if item.variant is None:
+                    raise ValidationError(
+                        f"Variant missing for order item {item.id}"
+                    )
+
+                ProductVariant.objects.filter(
+                    id=item.variant_id
+                ).update(
+                    stock=F("stock") + item.quantity
+                )
+
+            else:
+
+                Product.objects.filter(
+                    id=item.product_id
+                ).update(
+                    stock=F("stock") + item.quantity
+                )
+
+        order.payment_status = "failed"
+        order.stock_restored = True
+
+        order.save(
+            update_fields=["payment_status", "stock_restored"]
+        )
+
+        print(f"Stock restored for order {order.id}", flush=True)
+
+        return True

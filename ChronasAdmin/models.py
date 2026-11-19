@@ -220,6 +220,8 @@ class Order(models.Model):
 
     subtotal = models.DecimalField(max_digits=12,decimal_places=2,default=0)
 
+    stock_restored = models.BooleanField(default=False)
+
     def __str__(self):
         return f"Order #{self.id}"
 
@@ -291,3 +293,52 @@ class ShippingPartner(models.Model):
 
     def __str__(self):
         return self.name
+
+
+
+class PaymentAttempt(models.Model):
+
+    GATEWAY_CHOICES = [
+        ("tabby", "Tabby"),
+        ("ziina", "Ziina"),
+    ]
+
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("authorized", "Authorized"),
+        ("completed", "Completed"),
+        ("rejected", "Rejected"),
+        ("failed", "Failed"),
+        ("expired", "Expired"),
+        ("cancelled", "Cancelled"),
+    ]
+
+    order = models.ForeignKey(
+        Order,
+        on_delete=models.CASCADE,
+        related_name="payment_attempts"
+    )
+
+    gateway = models.CharField(
+        max_length=20,
+        choices=GATEWAY_CHOICES
+    )
+
+    payment_id = models.CharField(
+        max_length=200,
+        unique=True,
+        null=True,
+        blank=True
+    )
+
+    status = models.CharField(
+        max_length=30,
+        choices=STATUS_CHOICES,
+        default="pending"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.gateway} - Order #{self.order_id} - {self.status}"
