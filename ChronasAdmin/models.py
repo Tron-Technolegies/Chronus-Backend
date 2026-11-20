@@ -3,7 +3,6 @@ from django.contrib.auth.models import User
 from cloudinary.models import CloudinaryField
 
 
-
 # Create your models here.
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -65,6 +64,8 @@ class Product(models.Model):
     ("fine_art", "Fine Art"),
     ("variant", "Variant Product"),
     )
+
+    has_size_pricing = models.BooleanField(default=False)
 
     
     GENDER_CHOICES = (
@@ -129,6 +130,23 @@ class FineArtSize(models.Model):
     def __str__(self):
         return f"{self.product.name} - {self.size}"
 
+
+
+class ProductSize(models.Model):
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="product_sizes"
+    )
+    size = models.CharField(max_length=50)
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2
+    )
+    stock = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.product.name} - {self.size}"
 
 
 class ProductImage(models.Model):
@@ -236,6 +254,8 @@ class OrderItem(models.Model):
     frame = models.ForeignKey(Frame, on_delete=models.SET_NULL, null=True, blank=True)
     material = models.ForeignKey(Material, on_delete=models.SET_NULL, null=True, blank=True)
     variant = models.ForeignKey(ProductVariant,on_delete=models.SET_NULL,null=True,blank=True,related_name="order_items")
+    product_size = models.ForeignKey(ProductSize,on_delete=models.SET_NULL,null=True,blank=True,related_name="order_items")
+
     def get_total_price(self):
         return self.quantity * self.price
     
@@ -342,3 +362,5 @@ class PaymentAttempt(models.Model):
 
     def __str__(self):
         return f"{self.gateway} - Order #{self.order_id} - {self.status}"
+
+

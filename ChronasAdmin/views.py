@@ -13,6 +13,7 @@ from rest_framework.decorators import api_view, permission_classes
 from ChronasAdmin.models import Category, Brand, FineArtSize, Product, Order, Coupon, ProductImage, SubCategory
 from ChronasAdmin.shipping.unified import create_unified_shipment
 from ChronusUser.models import Cart, CartItem
+from .models import ProductSize
 from .permissions import (
     StoreManagerPermission,
     StoreManagerOrSuperAdmin,
@@ -304,7 +305,7 @@ from rest_framework.decorators import (
 )
 
 
-
+from decimal import Decimal, InvalidOperation
 @api_view(["POST"])
 @permission_classes([StoreManagerOrSuperAdmin])
 @transaction.atomic
@@ -333,12 +334,17 @@ def add_products(request):
         height = request.POST.get("height", 10.00)
 
 
-        # product_type = request.POST.get(
-        #     "product_type",
-        #     "variant"
-        # )
+     
         product_type = request.POST.get("product_type")
-
+        has_size_pricing = (
+            request.POST.get("has_size_pricing", "false").lower()
+            in ["true", "1"]
+        )
+        if has_size_pricing and product_type != "variant":
+            return JsonResponse(
+                {"error": "Size pricing is only supported for variant products."},
+                status=400
+            )
         if product_type not in ["fine_art", "variant"]:
             return JsonResponse(
                 {"error": "Invalid product type"},
@@ -415,6 +421,7 @@ def add_products(request):
         product = Product.objects.create(
             supplier=supplier,
             product_type=product_type,
+            has_size_pricing=has_size_pricing,
             name=name,
             category=category,
             subcategory=subcategory,
@@ -533,6 +540,70 @@ def add_products(request):
                 "height": str(product.height),
 
                
+            }, status=201)
+        
+        elif product.has_size_pricing:
+
+            sizes = request.POST.get("sizes")
+
+            if not sizes:
+                return JsonResponse(
+                    {"error": "Sizes are required for this product."},
+                    status=400
+                )
+
+            try:
+                sizes = json.loads(sizes)
+
+                for item in sizes:
+                    size_name = item.get("size")
+                    size_price = item.get("price")
+                    try: 
+
+                        size_stock = int(item.get("stock", 0))
+                        size_price = Decimal(str(size_price))
+                    except (TypeError, ValueError, InvalidOperation):
+                        return JsonResponse(
+                            {"error": "Invalid size price or stock."},
+                            status=400
+                        )
+                    if (
+                        not size_name
+                        or not str(size_name).strip()
+                        or size_price <= 0
+                        or size_stock < 0
+                    ):
+                        return JsonResponse(
+                            {"error": "Invalid size details."},
+                            status=400
+                        )
+
+
+                    ProductSize.objects.create(
+                        product=product,
+                        size=size_name,
+                        price=size_price,
+                        stock=size_stock
+                    )
+
+            except (json.JSONDecodeError, TypeError, ValueError):
+                return JsonResponse(
+                    {"error": "Invalid sizes format."},
+                    status=400
+                )
+
+            return JsonResponse({
+                "message": "Size-priced product created successfully.",
+                "product_id": product.id,
+                "sizes": [
+                    {
+                        "id": s.id,
+                        "size": s.size,
+                        "price": str(s.price),
+                        "stock": s.stock
+                    }
+                    for s in product.product_sizes.all()
+                ]
             }, status=201)
         else:
             variants = request.POST.get("variants")
