@@ -801,6 +801,10 @@ def view_products(request):
                     ]
                 }
                 for variant in product.variants.all()
+                if (
+                    not (low_stock and low_stock.lower() == "true")
+                    or variant.stock <= stock_threshold
+                )
             ]
 
         data.append({
