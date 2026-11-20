@@ -913,8 +913,11 @@ from decimal import Decimal
 #     })
 
 
+from django.db import transaction
+
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@transaction.atomic
 def checkout(request):
 
     currency = request.data.get(
@@ -991,58 +994,110 @@ def checkout(request):
 
     total = subtotal + shipping_charge
 
+    # # ----------------------------------
+    # # 5. VALIDATE STOCK
+    # # ----------------------------------
+
+    # for item in items:
+
+    #     # VARIANT PRODUCTS
+
+    #     if item.product.product_type == "variant":
+
+    #         if not item.variant:
+
+    #             return Response(
+    #                 {
+    #                     "error": (
+    #                         f"Variant missing for "
+    #                         f"{item.product.name}"
+    #                     )
+    #                 },
+    #                 status=400
+    #             )
+
+    #         if item.variant.stock < item.quantity:
+
+    #             return Response(
+    #                 {
+    #                     "error": (
+    #                         f"Only {item.variant.stock} "
+    #                         f"item(s) available for "
+    #                         f"{item.product.name}"
+    #                     )
+    #                 },
+    #                 status=400
+    #             )
+
+    #     # FINE ART PRODUCTS
+
+    #     else:
+
+    #         if item.product.stock < item.quantity:
+
+    #             return Response(
+    #                 {
+    #                     "error": (
+    #                         f"Only {item.product.stock} "
+    #                         f"item(s) available for "
+    #                         f"{item.product.name}"
+    #                     )
+    #                 },
+    #                 status=400
+    #             )
     # ----------------------------------
-    # 5. VALIDATE STOCK
+    # 5. VALIDATE STOCK WITH ROW LOCKS
     # ----------------------------------
+
+    stock_updates = []
 
     for item in items:
-
-        # VARIANT PRODUCTS
 
         if item.product.product_type == "variant":
 
             if not item.variant:
+                return Response(
+                    {
+                        "error": f"Variant missing for {item.product.name}"
+                    },
+                    status=400
+                )
 
+            variant = ProductVariant.objects.select_for_update().get(
+                id=item.variant_id
+            )
+
+            if variant.stock < item.quantity:
                 return Response(
                     {
                         "error": (
-                            f"Variant missing for "
-                            f"{item.product.name}"
+                            f"Only {variant.stock} item(s) available "
+                            f"for {item.product.name}"
                         )
                     },
                     status=400
                 )
 
-            if item.variant.stock < item.quantity:
-
-                return Response(
-                    {
-                        "error": (
-                            f"Only {item.variant.stock} "
-                            f"item(s) available for "
-                            f"{item.product.name}"
-                        )
-                    },
-                    status=400
-                )
-
-        # FINE ART PRODUCTS
+            stock_updates.append((variant, item.quantity))
 
         else:
 
-            if item.product.stock < item.quantity:
+            product = Product.objects.select_for_update().get(
+                id=item.product_id
+            )
 
+            if product.stock < item.quantity:
                 return Response(
                     {
                         "error": (
-                            f"Only {item.product.stock} "
-                            f"item(s) available for "
-                            f"{item.product.name}"
+                            f"Only {product.stock} item(s) available "
+                            f"for {item.product.name}"
                         )
                     },
                     status=400
                 )
 
+            stock_updates.append((product, item.quantity))
     # ----------------------------------
     # 6. GUEST CHECKOUT
     # ----------------------------------
@@ -1263,32 +1318,44 @@ def checkout(request):
         order_items
     )
 
+    # # ----------------------------------
+    # # 13. DEDUCT STOCK
+    # # ----------------------------------
+
+    # for item in items:
+
+    #     # VARIANT PRODUCTS
+
+    #     if item.product.product_type == "variant":
+
+    #         item.variant.stock -= item.quantity
+
+    #         item.variant.save(
+    #             update_fields=["stock"]
+    #         )
+
+    #     # FINE ART PRODUCTS
+
+    #     else:
+
+    #         item.product.stock -= item.quantity
+
+    #         item.product.save(
+    #             update_fields=["stock"]
+    #         )
+
+
     # ----------------------------------
     # 13. DEDUCT STOCK
     # ----------------------------------
 
-    for item in items:
+    for stock_object, quantity in stock_updates:
 
-        # VARIANT PRODUCTS
+        stock_object.stock -= quantity
 
-        if item.product.product_type == "variant":
-
-            item.variant.stock -= item.quantity
-
-            item.variant.save(
-                update_fields=["stock"]
-            )
-
-        # FINE ART PRODUCTS
-
-        else:
-
-            item.product.stock -= item.quantity
-
-            item.product.save(
-                update_fields=["stock"]
-            )
-
+        stock_object.save(
+            update_fields=["stock"]
+        )
     # ----------------------------------
     # 14. CURRENCY CONVERSION
     # ----------------------------------
@@ -2183,6 +2250,16 @@ class CreateZiinaPayment(APIView):
                         },
                         status=403
                     )
+                
+                # CHECK ORDER PAYMENT STATUS
+
+            if order.payment_status != "pending" or order.stock_restored:
+                return Response(
+                    {
+                        "error": "This order is no longer available for payment. Please create a new order."
+                    },
+                    status=400
+                    )
 
 
             currency = order.currency.upper()
@@ -2242,7 +2319,21 @@ class CreateZiinaPayment(APIView):
 
                 "message": f"Order {order.id}",
                 "test": True,
+                # CHANGED: where Ziina sends the customer after the payment
+                "success_url": (
+                    f"https://chronosgallery.com/payment-success"
+                    f"?gateway=ziina&order_id={order.id}"
+                ),
 
+                "cancel_url": (
+                    f"https://chronosgallery.com/payment-cancel"
+                    f"?gateway=ziina&order_id={order.id}"
+                ),
+
+                "failure_url": (
+                    f"https://chronosgallery.com/payment-failure"
+                    f"?gateway=ziina&order_id={order.id}"
+                ),
 
                 "metadata": {
 
@@ -2263,7 +2354,8 @@ class CreateZiinaPayment(APIView):
             response = requests.post(
                 url,
                 json=payload,
-                headers=headers
+                headers=headers,
+                timeout=30
             )
 
 
@@ -2281,7 +2373,14 @@ class CreateZiinaPayment(APIView):
             )
 
 
-            data = response.json()
+            # data = response.json()
+            try:
+                data = response.json()
+            except ValueError:
+                return Response(
+                    {"error": "Invalid response received from Ziina"},
+                    status=502
+                )
 
             if response.status_code not in [200, 201]:
 
@@ -2370,6 +2469,8 @@ class CreateZiinaPayment(APIView):
 
 
 import hashlib
+
+
 import hmac
 import logging
 
@@ -2695,11 +2796,38 @@ class ZiinaWebhook(APIView):
                         flush=True
                     )
 
+        # elif payment_status == "failed":
+
+        #     if payment_attempt.status != "completed":
+        #         payment_attempt.status = "failed"
+        #         payment_attempt.save(update_fields=["status"])
+
+        #     print(
+        #         f"ZIINA PAYMENT ATTEMPT FAILED FOR ORDER {order.id}",
+        #         flush=True
+        #     )
+
+        # elif payment_status == "pending":
+
+        #     if payment_attempt.status not in ["completed", "failed"]:
+        #         payment_attempt.status = "pending"
+        #         payment_attempt.save(update_fields=["status"])
+
         elif payment_status == "failed":
 
-            if payment_attempt.status != "completed":
-                payment_attempt.status = "failed"
-                payment_attempt.save(update_fields=["status"])
+            with transaction.atomic():
+
+                locked_order = Order.objects.select_for_update().get(
+                    pk=order.pk
+                )
+
+                locked_attempt = PaymentAttempt.objects.select_for_update().get(
+                    pk=payment_attempt.pk
+                )
+
+                if locked_attempt.status not in ["completed", "authorized"]:
+                    locked_attempt.status = "failed"
+                    locked_attempt.save(update_fields=["status"])
 
             print(
                 f"ZIINA PAYMENT ATTEMPT FAILED FOR ORDER {order.id}",
@@ -2708,9 +2836,24 @@ class ZiinaWebhook(APIView):
 
         elif payment_status == "pending":
 
-            if payment_attempt.status not in ["completed", "failed"]:
-                payment_attempt.status = "pending"
-                payment_attempt.save(update_fields=["status"])
+            with transaction.atomic():
+
+                locked_order = Order.objects.select_for_update().get(
+                    pk=order.pk
+                )
+
+                locked_attempt = PaymentAttempt.objects.select_for_update().get(
+                    pk=payment_attempt.pk
+                )
+
+                if locked_attempt.status not in [
+                    "completed",
+                    "failed",
+                    "authorized"
+                ]:
+                    locked_attempt.status = "pending"
+                    locked_attempt.save(update_fields=["status"])
+
 
         elif payment_status == "requires_user_action":
 
@@ -3143,10 +3286,11 @@ from datetime import timezone as dt_timezone
 from django.utils import timezone
 from decimal import Decimal
 
+
+
 class CreateTabbyPayment(APIView):
 
     permission_classes = [AllowAny]
-
 
     def post(self, request):
 
@@ -3157,72 +3301,60 @@ class CreateTabbyPayment(APIView):
                 flush=True
             )
 
-
             order_id = request.data.get("order_id")
 
-
             if not order_id:
-
                 return Response(
-                    {
-                        "error": "order_id required"
-                    },
+                    {"error": "order_id required"},
                     status=400
                 )
 
+            order = Order.objects.get(id=order_id)
 
-            order = Order.objects.get(
-                id=order_id
-            )
+            print("ORDER:", order.id, flush=True)
+            print("ORDER TOTAL:", order.total_amount, flush=True)
 
-
-            print(
-                "ORDER:",
-                order.id,
-                flush=True
-            )
-
-
-            print(
-                "ORDER TOTAL:",
-                order.total_amount,
-                flush=True
-            )
-
-
-            # SECURITY CHECK
+            # ----------------------------------
+            # 1. SECURITY CHECK
+            # ----------------------------------
 
             if request.user.is_authenticated:
 
                 if order.user != request.user:
-
                     return Response(
-                        {
-                            "error": "Unauthorized order access"
-                        },
+                        {"error": "Unauthorized order access"},
                         status=403
                     )
-
 
             else:
 
-                guest_id = request.headers.get(
-                    "X-Guest-Id"
-                )
-
+                guest_id = request.headers.get("X-Guest-Id")
 
                 if not guest_id or order.guest_id != guest_id:
-
                     return Response(
-                        {
-                            "error": "Unauthorized guest order"
-                        },
+                        {"error": "Unauthorized guest order"},
                         status=403
                     )
 
+            # ----------------------------------
+            # 2. CHECK ORDER STATUS
+            # ----------------------------------
+
+            if order.payment_status != "pending" or order.stock_restored:
+
+                return Response(
+                    {
+                        "error": "This order is no longer available for payment.",
+                        "message": "Please create a new order and try again."
+                    },
+                    status=400
+                )
+
+            # ----------------------------------
+            # 3. VALIDATE CURRENCY
+            # ----------------------------------
 
             currency = order.currency.upper()
-
 
             supported_currencies = [
                 "AED",
@@ -3231,7 +3363,6 @@ class CreateTabbyPayment(APIView):
                 "BHD",
                 "QAR"
             ]
-
 
             if currency not in supported_currencies:
 
@@ -3243,51 +3374,55 @@ class CreateTabbyPayment(APIView):
                     status=400
                 )
 
+            # ----------------------------------
+            # 4. TABBY API CONFIGURATION
+            # ----------------------------------
 
             url = "https://api.tabby.ai/api/v2/checkout"
 
-
             headers = {
-
                 "Authorization": f"Bearer {settings.TABBY_SECRET_KEY}",
-
                 "Content-Type": "application/json"
-
             }
-            shipping_amount = order.shipping_charge or Decimal("0.00")
-            # Get actual customer registration date
+
+            shipping_amount = (
+                order.shipping_charge or Decimal("0.00")
+            )
+
+            # ----------------------------------
+            # 5. BUYER REGISTRATION DATE
+            # ----------------------------------
+
             if order.user:
                 registered_since = order.user.date_joined
             else:
                 registered_since = order.created_at
 
-            # Convert to UTC ISO 8601 format
             if timezone.is_naive(registered_since):
-                registered_since = timezone.make_aware(registered_since)
+                registered_since = timezone.make_aware(
+                    registered_since
+                )
 
             registered_since = (
                 registered_since
                 .astimezone(dt_timezone.utc)
                 .isoformat()
                 .replace("+00:00", "Z")
-)
+            )
+
+            # ----------------------------------
+            # 6. TABBY PAYLOAD
+            # ----------------------------------
 
             payload = {
 
-
                 "payment": {
 
-
-                    "amount": str(
-                        order.total_amount
-                    ),
-
+                    "amount": str(order.total_amount),
 
                     "currency": currency,
 
-
                     "description": f"Order #{order.id}",
-
 
                     "buyer": {
 
@@ -3296,23 +3431,19 @@ class CreateTabbyPayment(APIView):
                         "phone": order.phone,
 
                         "name": (
-                            order.receiver_name
-                            or "Customer"
+                            order.receiver_name or "Customer"
                         )
-
                     },
-
 
                     "order": {
 
+                        "reference_id": str(order.id),
 
-                        "reference_id": str(
-                            order.id
-                        ),
                         "shipping_amount": str(shipping_amount),
-                        "tax_amount": "0.00",
-                        "discount_amount": "0.00",
 
+                        "tax_amount": "0.00",
+
+                        "discount_amount": "0.00",
 
                         "items": [
 
@@ -3324,14 +3455,9 @@ class CreateTabbyPayment(APIView):
                                     else "Product"
                                 ),
 
-
                                 "quantity": item.quantity,
 
-
-                                "unit_price": str(
-                                    item.price
-                                ),
-
+                                "unit_price": str(item.price),
 
                                 "category": (
                                     item.product.category.name
@@ -3348,7 +3474,6 @@ class CreateTabbyPayment(APIView):
 
                     },
 
-
                     "shipping_address": {
 
                         "address": order.shipping_address,
@@ -3359,10 +3484,9 @@ class CreateTabbyPayment(APIView):
 
                     },
 
-
                     "buyer_history": {
 
-                        "registered_since":  registered_since,
+                        "registered_since": registered_since,
 
                         "loyalty_level": 0
 
@@ -3370,22 +3494,30 @@ class CreateTabbyPayment(APIView):
 
                 },
 
-
                 "lang": "en",
-
 
                 "merchant_code": "VVAE",
 
-
                 "merchant_urls": {
-                        "success": "https://chronosgallery.com/payment-success?gateway=tabby",
-                        "cancel": "https://chronosgallery.com/payment-cancel?gateway=tabby",
-                        "failure": "https://chronosgallery.com/payment-failure?gateway=tabby"
-                    }
 
+                    "success": (
+                        "https://chronosgallery.com/"
+                        "payment-success?gateway=tabby"
+                    ),
+
+                    "cancel": (
+                        "https://chronosgallery.com/"
+                        "payment-cancel?gateway=tabby"
+                    ),
+
+                    "failure": (
+                        "https://chronosgallery.com/"
+                        "payment-failure?gateway=tabby"
+                    )
+
+                }
 
             }
-
 
             print(
                 "TABBY PAYLOAD:",
@@ -3393,6 +3525,9 @@ class CreateTabbyPayment(APIView):
                 flush=True
             )
 
+            # ----------------------------------
+            # 7. CREATE TABBY CHECKOUT SESSION
+            # ----------------------------------
 
             response = requests.post(
                 url,
@@ -3401,13 +3536,11 @@ class CreateTabbyPayment(APIView):
                 timeout=30
             )
 
-
             print(
                 "TABBY STATUS:",
                 response.status_code,
                 flush=True
             )
-
 
             print(
                 "TABBY RAW RESPONSE:",
@@ -3415,14 +3548,10 @@ class CreateTabbyPayment(APIView):
                 flush=True
             )
 
-
             try:
-
                 data = response.json()
 
-
             except Exception:
-
 
                 return Response(
                     {
@@ -3432,55 +3561,142 @@ class CreateTabbyPayment(APIView):
                     status=500
                 )
 
-
-            
-
-            # FIXED CHECKOUT URL EXTRACTION
-
-            # payment_url = None
             if response.status_code not in [200, 201]:
 
                 return Response(
-                    {
-                        "error": data
-                    },
+                    {"error": data},
                     status=response.status_code
                 )
 
-           
-            # Handle Tabby pre-scoring rejection
-            session_status = str(data.get("status", "")).lower()
+            # ----------------------------------
+            # 8. HANDLE PRE-SCORING REJECTION
+            # ----------------------------------
+
+            session_status = str(
+                data.get("status", "")
+            ).lower()
 
             if session_status == "rejected":
-                
+
+                print(
+                    f"TABBY PRE-SCORING REJECTED: Order {order.id}",
+                    flush=True
+                )
+
+                tabby_payment_id = (
+                    data.get("payment", {}).get("id")
+                )
+
+                # Record rejected attempt if an ID is supplied.
+                if tabby_payment_id:
+
+                    PaymentAttempt.objects.get_or_create(
+                        payment_id=tabby_payment_id,
+                        defaults={
+                            "order": order,
+                            "gateway": "tabby",
+                            "status": "rejected"
+                        }
+                    )
+
+                # ----------------------------------
+                # CHECK OTHER ACTIVE PAYMENT ATTEMPTS
+                # ----------------------------------
+
+                stock_restored = False
+
+                with transaction.atomic():
+
+                    locked_order = Order.objects.select_for_update().get(
+                        id=order.id
+                    )
+
+                    if (
+                        locked_order.payment_status != "paid"
+                        and not locked_order.stock_restored
+                    ):
+
+                        active_attempts = (
+                            locked_order.payment_attempts.filter(
+                                status__in=[
+                                    "pending",
+                                    "authorized",
+                                    "completed"
+                                ]
+                            )
+                        )
+
+                        if tabby_payment_id:
+                            active_attempts = active_attempts.exclude(
+                                payment_id=tabby_payment_id
+                            )
+
+                        if active_attempts.exists():
+
+                            print(
+                                f"STOCK RETAINED: Another active payment "
+                                f"exists for order {order.id}",
+                                flush=True
+                            )
+
+                        else:
+
+                            stock_restored = release_order_stock(
+                                locked_order.id
+                            )
+
+                print(
+                    f"TABBY REJECTION STOCK RESTORATION: "
+                    f"Order {order.id}, Result: {stock_restored}",
+                    flush=True
+                )
+
                 return Response(
                     {
                         "status": "rejected",
                         "code": "TABBY_PRE_SCORING_REJECTED",
+                        "order_id": order.id,
+                        "stock_restored": stock_restored,
                         "message": (
                             "Sorry, Tabby is unable to approve this purchase. "
-                            "Please use an alternative payment method for your order."
+                            "Please create a new order to try again."
                         )
                     },
                     status=200
                 )
 
+            # ----------------------------------
+            # 9. VALIDATE TABBY SESSION STATUS
+            # ----------------------------------
+
             if session_status not in ["created", "approved"]:
+
                 return Response(
                     {
                         "status": "error",
                         "code": "TABBY_SESSION_NOT_READY",
-                        "message": "Unable to initiate Tabby checkout."
+                        "message": (
+                            "Unable to initiate Tabby checkout."
+                        )
                     },
                     status=502
                 )
 
-            tabby_payment_id = (data.get("payment", {}).get("id"))
+            # ----------------------------------
+            # 10. GET TABBY PAYMENT ID
+            # ----------------------------------
+
+            tabby_payment_id = (
+                data.get("payment", {}).get("id")
+            )
+
             if not tabby_payment_id:
+
                 print(
                     "TABBY PAYMENT ID NOT FOUND IN RESPONSE",
                     flush=True
                 )
+
                 return Response(
                     {
                         "error": "Tabby payment ID not found",
@@ -3488,72 +3704,73 @@ class CreateTabbyPayment(APIView):
                     },
                     status=500
                 )
-            # order.payment_id = tabby_payment_id
-            # order.save(update_fields=["payment_id"])
-            PaymentAttempt.objects.create(
-                order=order,
-                gateway="tabby",
-                payment_id=tabby_payment_id,
-                status="pending"
-)
-            print(
-                    "TABBY PAYMENT ID:",
-                    tabby_payment_id,
-                    flush=True
-                )
-            
 
-
-
-            # FIXED CHECKOUT URL EXTRACTION
+            # ----------------------------------
+            # 11. EXTRACT CHECKOUT URL
+            # ----------------------------------
 
             payment_url = None
 
-
             installments = (
-                data.get(
-                    "configuration",
-                    {}
-                )
-                .get(
-                    "available_products",
-                    {}
-                )
-                .get(
-                    "installments",
-                    []
-                )
+                data.get("configuration", {})
+                .get("available_products", {})
+                .get("installments", [])
             )
 
+            if installments and isinstance(installments, list):
 
-            if (
-                installments
-                and isinstance(
-                    installments,
-                    list
-                )
-            ):
-
-                payment_url = installments[0].get(
-                    "web_url"
-                )
-
+                payment_url = installments[0].get("web_url")
 
             if not payment_url:
 
-                payment_url = data.get(
-                    "web_url"
-                )
+                payment_url = data.get("web_url")
+
+            # ----------------------------------
+            # 12. RECORD PAYMENT ATTEMPT
+            # ----------------------------------
+
+            PaymentAttempt.objects.get_or_create(
+                payment_id=tabby_payment_id,
+                defaults={
+                    "order": order,
+                    "gateway": "tabby",
+                    "status": "pending"
+                }
+            )
+
+            print(
+                "TABBY PAYMENT ID:",
+                tabby_payment_id,
+                flush=True
+            )
+
+            # Do not restore stock here.
+            # A Tabby payment session has already been created.
+
             if not payment_url:
+
+                print(
+                    "TABBY CHECKOUT URL MISSING",
+                    flush=True
+                )
+
                 return Response(
                     {
                         "status": "error",
                         "code": "TABBY_CHECKOUT_URL_MISSING",
-                        "message": "Unable to retrieve Tabby checkout URL."
+                        "payment_id": tabby_payment_id,
+                        "message": (
+                            "Tabby created a payment session, "
+                            "but the checkout URL is unavailable. "
+                            "Please contact support."
+                        )
                     },
                     status=502
                 )
 
+            # ----------------------------------
+            # 13. SUCCESS RESPONSE
+            # ----------------------------------
 
             print(
                 "TABBY PAYMENT URL:",
@@ -3561,50 +3778,38 @@ class CreateTabbyPayment(APIView):
                 flush=True
             )
 
-
             return Response(
                 {
                     "payment_id": tabby_payment_id,
-                    "payment_url": payment_url
-                }
+                    "payment_url": payment_url,
+                    "order_id": order.id
+                },
+                status=200
             )
-
 
         except Order.DoesNotExist:
 
-
             return Response(
-                {
-                    "error": "Invalid order"
-                },
+                {"error": "Invalid order"},
                 status=404
             )
 
-
         except Exception as e:
-
 
             print(
                 "=========== TABBY ERROR ===========",
                 flush=True
             )
 
-
-            print(
-                str(e),
-                flush=True
-            )
-
+            print(str(e), flush=True)
 
             traceback.print_exc()
 
-
             return Response(
-                {
-                    "error": str(e)
-                },
+                {"error": str(e)},
                 status=500
             )
+
 
 
 def capture_tabby_payment(order, payment_id):
@@ -3613,20 +3818,16 @@ def capture_tabby_payment(order, payment_id):
     Returns (success, response_data).
     """
 
-    # if not order.payment_id:
-    #     return False, {
-    #         "error": "Order does not have a Tabby payment ID"
-    #     }
     if not payment_id:
         return False, {
             "error": "Tabby payment ID is missing"
         }
 
-    # capture_url = (
-    #     f"https://api.tabby.ai/api/v2/payments/"
-    #     f"{order.payment_id}/captures"
-    # )
-    capture_url = f"https://api.tabby.ai/api/v2/payments/{payment_id}/captures"
+    capture_url = (
+        f"https://api.tabby.ai/api/v2/payments/"
+        f"{payment_id}/captures"
+    )
+
     headers = {
         "Authorization": f"Bearer {settings.TABBY_SECRET_KEY}",
         "Content-Type": "application/json",
@@ -3642,53 +3843,599 @@ def capture_tabby_payment(order, payment_id):
         "discount_amount": "0.00",
     }
 
-    print(
-        "========== TABBY CAPTURE ==========",
-        flush=True
-    )
-
-    print(
-        "CAPTURE URL:",
-        capture_url,
-        flush=True
-    )
-
-    print(
-        "CAPTURE PAYLOAD:",
-        payload,
-        flush=True
-    )
-
-    response = requests.post(
-        capture_url,
-        json=payload,
-        headers=headers,
-        timeout=30
-    )
-
-    print(
-        "TABBY CAPTURE STATUS:",
-        response.status_code,
-        flush=True
-    )
-
-    print(
-        "TABBY CAPTURE RESPONSE:",
-        response.text,
-        flush=True
-    )
+    print("========== TABBY CAPTURE ==========", flush=True)
+    print("CAPTURE URL:", capture_url, flush=True)
+    print("CAPTURE PAYLOAD:", payload, flush=True)
 
     try:
-        data = response.json()
-    except Exception:
-        data = {
-            "raw_response": response.text
+        response = requests.post(
+            capture_url,
+            json=payload,
+            headers=headers,
+            timeout=30
+        )
+
+        print(
+            "TABBY CAPTURE STATUS:",
+            response.status_code,
+            flush=True
+        )
+
+        print(
+            "TABBY CAPTURE RESPONSE:",
+            response.text,
+            flush=True
+        )
+
+        try:
+            data = response.json()
+        except ValueError:
+            data = {"raw_response": response.text}
+
+        if response.status_code not in [200, 201]:
+            return False, data
+
+        return True, data
+
+    except requests.RequestException as e:
+        print(
+            "TABBY CAPTURE REQUEST ERROR:",
+            str(e),
+            flush=True
+        )
+
+        return False, {
+            "error": str(e),
+            "capture_status": "unknown"
         }
 
-    if response.status_code not in [200, 201]:
-        return False, data
 
-    return True, data
+# class CreateTabbyPayment(APIView):
+
+#     permission_classes = [AllowAny]
+
+
+#     def post(self, request):
+
+#         try:
+
+#             print(
+#                 "========== TABBY START ==========",
+#                 flush=True
+#             )
+
+
+#             order_id = request.data.get("order_id")
+
+
+#             if not order_id:
+
+#                 return Response(
+#                     {
+#                         "error": "order_id required"
+#                     },
+#                     status=400
+#                 )
+
+
+#             order = Order.objects.get(
+#                 id=order_id
+#             )
+
+
+#             print(
+#                 "ORDER:",
+#                 order.id,
+#                 flush=True
+#             )
+
+
+#             print(
+#                 "ORDER TOTAL:",
+#                 order.total_amount,
+#                 flush=True
+#             )
+
+
+#             # SECURITY CHECK
+
+#             if request.user.is_authenticated:
+
+#                 if order.user != request.user:
+
+#                     return Response(
+#                         {
+#                             "error": "Unauthorized order access"
+#                         },
+#                         status=403
+#                     )
+
+
+#             else:
+
+#                 guest_id = request.headers.get(
+#                     "X-Guest-Id"
+#                 )
+
+
+#                 if not guest_id or order.guest_id != guest_id:
+
+#                     return Response(
+#                         {
+#                             "error": "Unauthorized guest order"
+#                         },
+#                         status=403
+#                     )
+
+
+#             currency = order.currency.upper()
+
+
+#             supported_currencies = [
+#                 "AED",
+#                 "SAR",
+#                 "KWD",
+#                 "BHD",
+#                 "QAR"
+#             ]
+
+
+#             if currency not in supported_currencies:
+
+#                 return Response(
+#                     {
+#                         "error": "Currency not supported by Tabby",
+#                         "currency": currency
+#                     },
+#                     status=400
+#                 )
+
+
+#             url = "https://api.tabby.ai/api/v2/checkout"
+
+
+#             headers = {
+
+#                 "Authorization": f"Bearer {settings.TABBY_SECRET_KEY}",
+
+#                 "Content-Type": "application/json"
+
+#             }
+#             shipping_amount = order.shipping_charge or Decimal("0.00")
+#             # Get actual customer registration date
+#             if order.user:
+#                 registered_since = order.user.date_joined
+#             else:
+#                 registered_since = order.created_at
+
+#             # Convert to UTC ISO 8601 format
+#             if timezone.is_naive(registered_since):
+#                 registered_since = timezone.make_aware(registered_since)
+
+#             registered_since = (
+#                 registered_since
+#                 .astimezone(dt_timezone.utc)
+#                 .isoformat()
+#                 .replace("+00:00", "Z")
+# )
+
+#             payload = {
+
+
+#                 "payment": {
+
+
+#                     "amount": str(
+#                         order.total_amount
+#                     ),
+
+
+#                     "currency": currency,
+
+
+#                     "description": f"Order #{order.id}",
+
+
+#                     "buyer": {
+
+#                         "email": order.email,
+
+#                         "phone": order.phone,
+
+#                         "name": (
+#                             order.receiver_name
+#                             or "Customer"
+#                         )
+
+#                     },
+
+
+#                     "order": {
+
+
+#                         "reference_id": str(
+#                             order.id
+#                         ),
+#                         "shipping_amount": str(shipping_amount),
+#                         "tax_amount": "0.00",
+#                         "discount_amount": "0.00",
+
+
+#                         "items": [
+
+#                             {
+
+#                                 "title": (
+#                                     item.product.name
+#                                     if item.product
+#                                     else "Product"
+#                                 ),
+
+
+#                                 "quantity": item.quantity,
+
+
+#                                 "unit_price": str(
+#                                     item.price
+#                                 ),
+
+
+#                                 "category": (
+#                                     item.product.category.name
+#                                     if item.product
+#                                     and item.product.category
+#                                     else "General"
+#                                 )
+
+#                             }
+
+#                             for item in order.items.all()
+
+#                         ]
+
+#                     },
+
+
+#                     "shipping_address": {
+
+#                         "address": order.shipping_address,
+
+#                         "city": order.city,
+
+#                         "country": order.country
+
+#                     },
+
+
+#                     "buyer_history": {
+
+#                         "registered_since":  registered_since,
+
+#                         "loyalty_level": 0
+
+#                     }
+
+#                 },
+
+
+#                 "lang": "en",
+
+
+#                 "merchant_code": "VVAE",
+
+
+#                 "merchant_urls": {
+#                         "success": "https://chronosgallery.com/payment-success?gateway=tabby",
+#                         "cancel": "https://chronosgallery.com/payment-cancel?gateway=tabby",
+#                         "failure": "https://chronosgallery.com/payment-failure?gateway=tabby"
+#                     }
+
+
+#             }
+
+
+#             print(
+#                 "TABBY PAYLOAD:",
+#                 payload,
+#                 flush=True
+#             )
+
+
+#             response = requests.post(
+#                 url,
+#                 json=payload,
+#                 headers=headers,
+#                 timeout=30
+#             )
+
+
+#             print(
+#                 "TABBY STATUS:",
+#                 response.status_code,
+#                 flush=True
+#             )
+
+
+#             print(
+#                 "TABBY RAW RESPONSE:",
+#                 response.text,
+#                 flush=True
+#             )
+
+
+#             try:
+
+#                 data = response.json()
+
+
+#             except Exception:
+
+
+#                 return Response(
+#                     {
+#                         "error": "Invalid Tabby response",
+#                         "response": response.text
+#                     },
+#                     status=500
+#                 )
+
+
+            
+
+#             # FIXED CHECKOUT URL EXTRACTION
+
+#             # payment_url = None
+#             if response.status_code not in [200, 201]:
+
+#                 return Response(
+#                     {
+#                         "error": data
+#                     },
+#                     status=response.status_code
+#                 )
+
+           
+#             # Handle Tabby pre-scoring rejection
+#             session_status = str(data.get("status", "")).lower()
+
+#             if session_status == "rejected":
+                
+#                 return Response(
+#                     {
+#                         "status": "rejected",
+#                         "code": "TABBY_PRE_SCORING_REJECTED",
+#                         "message": (
+#                             "Sorry, Tabby is unable to approve this purchase. "
+#                             "Please use an alternative payment method for your order."
+#                         )
+#                     },
+#                     status=200
+#                 )
+
+#             if session_status not in ["created", "approved"]:
+#                 return Response(
+#                     {
+#                         "status": "error",
+#                         "code": "TABBY_SESSION_NOT_READY",
+#                         "message": "Unable to initiate Tabby checkout."
+#                     },
+#                     status=502
+#                 )
+
+#             tabby_payment_id = (data.get("payment", {}).get("id"))
+#             if not tabby_payment_id:
+#                 print(
+#                     "TABBY PAYMENT ID NOT FOUND IN RESPONSE",
+#                     flush=True
+#                 )
+#                 return Response(
+#                     {
+#                         "error": "Tabby payment ID not found",
+#                         "response": data
+#                     },
+#                     status=500
+#                 )
+#             # order.payment_id = tabby_payment_id
+#             # order.save(update_fields=["payment_id"])
+#             PaymentAttempt.objects.create(
+#                 order=order,
+#                 gateway="tabby",
+#                 payment_id=tabby_payment_id,
+#                 status="pending"
+# )
+#             print(
+#                     "TABBY PAYMENT ID:",
+#                     tabby_payment_id,
+#                     flush=True
+#                 )
+            
+
+
+
+#             # FIXED CHECKOUT URL EXTRACTION
+
+#             payment_url = None
+
+
+#             installments = (
+#                 data.get(
+#                     "configuration",
+#                     {}
+#                 )
+#                 .get(
+#                     "available_products",
+#                     {}
+#                 )
+#                 .get(
+#                     "installments",
+#                     []
+#                 )
+#             )
+
+
+#             if (
+#                 installments
+#                 and isinstance(
+#                     installments,
+#                     list
+#                 )
+#             ):
+
+#                 payment_url = installments[0].get(
+#                     "web_url"
+#                 )
+
+
+#             if not payment_url:
+
+#                 payment_url = data.get(
+#                     "web_url"
+#                 )
+#             if not payment_url:
+#                 return Response(
+#                     {
+#                         "status": "error",
+#                         "code": "TABBY_CHECKOUT_URL_MISSING",
+#                         "message": "Unable to retrieve Tabby checkout URL."
+#                     },
+#                     status=502
+#                 )
+
+
+#             print(
+#                 "TABBY PAYMENT URL:",
+#                 payment_url,
+#                 flush=True
+#             )
+
+
+#             return Response(
+#                 {
+#                     "payment_id": tabby_payment_id,
+#                     "payment_url": payment_url
+#                 }
+#             )
+
+
+#         except Order.DoesNotExist:
+
+
+#             return Response(
+#                 {
+#                     "error": "Invalid order"
+#                 },
+#                 status=404
+#             )
+
+
+#         except Exception as e:
+
+
+#             print(
+#                 "=========== TABBY ERROR ===========",
+#                 flush=True
+#             )
+
+
+#             print(
+#                 str(e),
+#                 flush=True
+#             )
+
+
+#             traceback.print_exc()
+
+
+#             return Response(
+#                 {
+#                     "error": str(e)
+#                 },
+#                 status=500
+#             )
+
+
+# def capture_tabby_payment(order, payment_id):
+#     """
+#     Capture an authorized Tabby payment.
+#     Returns (success, response_data).
+#     """
+
+#     # if not order.payment_id:
+#     #     return False, {
+#     #         "error": "Order does not have a Tabby payment ID"
+#     #     }
+#     if not payment_id:
+#         return False, {
+#             "error": "Tabby payment ID is missing"
+#         }
+
+#     # capture_url = (
+#     #     f"https://api.tabby.ai/api/v2/payments/"
+#     #     f"{order.payment_id}/captures"
+#     # )
+#     capture_url = f"https://api.tabby.ai/api/v2/payments/{payment_id}/captures"
+#     headers = {
+#         "Authorization": f"Bearer {settings.TABBY_SECRET_KEY}",
+#         "Content-Type": "application/json",
+#     }
+
+#     shipping_amount = order.shipping_charge or Decimal("0.00")
+
+#     payload = {
+#         "amount": str(order.total_amount),
+#         "reference_id": f"order-{order.id}-capture",
+#         "shipping_amount": str(shipping_amount),
+#         "tax_amount": "0.00",
+#         "discount_amount": "0.00",
+#     }
+
+#     print(
+#         "========== TABBY CAPTURE ==========",
+#         flush=True
+#     )
+
+#     print(
+#         "CAPTURE URL:",
+#         capture_url,
+#         flush=True
+#     )
+
+#     print(
+#         "CAPTURE PAYLOAD:",
+#         payload,
+#         flush=True
+#     )
+
+#     response = requests.post(
+#         capture_url,
+#         json=payload,
+#         headers=headers,
+#         timeout=30
+#     )
+
+#     print(
+#         "TABBY CAPTURE STATUS:",
+#         response.status_code,
+#         flush=True
+#     )
+
+#     print(
+#         "TABBY CAPTURE RESPONSE:",
+#         response.text,
+#         flush=True
+#     )
+
+#     try:
+#         data = response.json()
+#     except Exception:
+#         data = {
+#             "raw_response": response.text
+#         }
+
+#     if response.status_code not in [200, 201]:
+#         return False, data
+
+#     return True, data
 
 
 from .models import Order
@@ -4010,46 +4757,260 @@ class TabbyWebhook(APIView):
             # 7. Payment AUTHORIZED
             # ==================================================
 
+        #     elif payment_status == "AUTHORIZED":
+
+        #         if order.stock_restored or order.payment_status == "failed":
+
+        #             print(
+        #                 f"WARNING: Tabby authorization received after stock restoration. "
+        #                 f"Order: {order.id}",
+        #                 flush=True
+        #             )
+
+        #             return Response(
+        #                 {
+        #                     "status": "order_already_failed",
+        #                     "order_id": order.id
+        #                 },
+        #                 status=200
+        #             )
+        #         if order.payment_status == "paid":
+        #             return Response(
+        #                 {"status": "order_already_paid"},
+        #                 status=200
+        # )
+  
+
+        #         print(
+        #             "TABBY PAYMENT AUTHORIZED:",
+        #             order.id,
+        #             flush=True
+        #         )
+
+        #         payment_attempt.status = "authorized"
+        #         payment_attempt.save(update_fields=["status"])
+
+        #         # ----------------------------------------------
+        #         # Capture payment
+        #         # ----------------------------------------------
+
+        #         capture_success, capture_data = capture_tabby_payment(
+        #             order,
+        #             payment_attempt.payment_id
+        #         )
+
+        #         if not capture_success:
+
+        #             print(
+        #                 "TABBY CAPTURE FAILED:",
+        #                 capture_data,
+        #                 flush=True
+        #             )
+
+        #             return Response(
+        #                 {
+        #                     "error": "Tabby capture failed",
+        #                     "details": capture_data
+        #                 },
+        #                 status=500
+        #             )
+
+        #         print(
+        #             "TABBY CAPTURE SUCCESSFUL:",
+        #             capture_data,
+        #             flush=True
+        #         )
+
+        #         # ----------------------------------------------
+        #         # Verify payment again after capture
+        #         # ----------------------------------------------
+
+        #         verify_url = (
+        #             f"https://api.tabby.ai/api/v2/payments/"
+        #             f"{payment_attempt.payment_id}"
+        #         )
+
+        #         verify_response = requests.get(
+        #             verify_url,
+        #             headers=headers,
+        #             timeout=20
+        #         )
+
+        #         print(
+        #             "TABBY POST-CAPTURE VERIFY:",
+        #             verify_response.status_code,
+        #             flush=True
+        #         )
+
+        #         print(
+        #             "TABBY POST-CAPTURE RESPONSE:",
+        #             verify_response.text,
+        #             flush=True
+        #         )
+
+        #         if verify_response.status_code != 200:
+
+        #             return Response(
+        #                 {
+        #                     "error": "Unable to verify payment after capture"
+        #                 },
+        #                 status=500
+        #             )
+
+        #         updated_payment = verify_response.json()
+
+        #         updated_status = (
+        #             updated_payment
+        #             .get("status", "")
+        #             .upper()
+        #         )
+
+        #         print(
+        #             "TABBY STATUS AFTER CAPTURE:",
+        #             updated_status,
+        #             flush=True
+        #         )
+
+        #         # ----------------------------------------------
+        #         # Payment successfully captured
+        #         # ----------------------------------------------
+
+        #         if updated_status == "CLOSED":
+
+        #             with transaction.atomic():
+
+        #                 locked_order = Order.objects.select_for_update().get(
+        #                     pk=order.pk
+        #                 )
+
+        #                 locked_attempt = PaymentAttempt.objects.select_for_update().get(
+        #                     pk=payment_attempt.pk
+        #                 )
+
+        #                 if locked_order.stock_restored or locked_order.payment_status == "failed":
+
+        #                     print(
+        #                         f"WARNING: Tabby captured after order failure. "
+        #                         f"Order: {locked_order.id}, Payment: {payment_id}",
+        #                         flush=True
+        #                     )
+
+        #                     return Response(
+        #                         {
+        #                             "status": "payment_reconciliation_required",
+        #                             "order_id": locked_order.id
+        #                         },
+        #                         status=200
+        #                     )
+
+        #                 if locked_order.payment_status == "paid":
+
+        #                     locked_attempt.status = "completed"
+        #                     locked_attempt.save(update_fields=["status"])
+
+        #                     if locked_order.payment_id != payment_id:
+        #                         print(
+        #                             f"WARNING: Another payment already paid Order "
+        #                             f"{locked_order.id}. Tabby Payment: {payment_id}, "
+        #                             f"Winning Payment: {locked_order.payment_id}",
+        #                             flush=True
+        #                         )
+
+        #                     print(
+        #                         "ORDER WAS ALREADY PAID:",
+        #                         locked_order.id,
+        #                         flush=True
+        #                     )
+
+        #                 else:
+
+        #                     locked_order.payment_status = "paid"
+        #                     locked_order.status = "processing"
+        #                     locked_order.payment_id = payment_id
+
+        #                     locked_order.save(
+        #                         update_fields=[
+        #                             "payment_status",
+        #                             "status",
+        #                             "payment_id"
+        #                         ]
+        #                     )
+
+        #                     locked_attempt.status = "completed"
+        #                     locked_attempt.save(update_fields=["status"])
+
+        #                     print(
+        #                         "ORDER MARKED AS PAID:",
+        #                         locked_order.id,
+        #                         flush=True
+        #                     )
+
+        #         else:
+
+        #             print(
+        #                 "PAYMENT NOT CLOSED AFTER CAPTURE:",
+        #                 updated_status,
+        #                 flush=True
+        #             )
+
+        #             return Response(
+        #                 {
+        #                     "status": "capture_pending",
+        #                     "payment_status": updated_status
+        #                 },
+        #                 status=200
+        #             )
+
             elif payment_status == "AUTHORIZED":
 
-                if order.stock_restored or order.payment_status == "failed":
+                # Lock order and payment attempt before authorizing.
+                with transaction.atomic():
+
+                    locked_order = Order.objects.select_for_update().get(
+                        pk=order.pk
+                    )
+
+                    locked_attempt = PaymentAttempt.objects.select_for_update().get(
+                        pk=payment_attempt.pk
+                    )
+
+                    if (
+                        locked_order.stock_restored
+                        or locked_order.payment_status == "failed"
+                    ):
+                        print(
+                            f"Tabby authorization received after order expiry. "
+                            f"Order: {locked_order.id}",
+                            flush=True
+                        )
+
+                        return Response(
+                            {
+                                "status": "order_already_failed",
+                                "order_id": locked_order.id
+                            },
+                            status=200
+                        )
+
+                    if locked_order.payment_status == "paid":
+                        return Response(
+                            {"status": "order_already_paid"},
+                            status=200
+                        )
+
+                    locked_attempt.status = "authorized"
+                    locked_attempt.save(update_fields=["status"])
 
                     print(
-                        f"WARNING: Tabby authorization received after stock restoration. "
-                        f"Order: {order.id}",
+                        "TABBY PAYMENT AUTHORIZED:",
+                        locked_order.id,
                         flush=True
                     )
 
-                    return Response(
-                        {
-                            "status": "order_already_failed",
-                            "order_id": order.id
-                        },
-                        status=200
-                    )
-                if order.payment_status == "paid":
-                    return Response(
-                        {"status": "order_already_paid"},
-                        status=200
-        )
-  
-
-                print(
-                    "TABBY PAYMENT AUTHORIZED:",
-                    order.id,
-                    flush=True
-                )
-
-                payment_attempt.status = "authorized"
-                payment_attempt.save(update_fields=["status"])
-
-                # ----------------------------------------------
-                # Capture payment
-                # ----------------------------------------------
-
+                # Capture payment only after the transaction commits.
                 capture_success, capture_data = capture_tabby_payment(
-                    order,
-                    payment_attempt.payment_id
+                    locked_order,
+                    locked_attempt.payment_id
                 )
 
                 if not capture_success:
@@ -4074,13 +5035,10 @@ class TabbyWebhook(APIView):
                     flush=True
                 )
 
-                # ----------------------------------------------
-                # Verify payment again after capture
-                # ----------------------------------------------
-
+                # Verify payment again after capture.
                 verify_url = (
                     f"https://api.tabby.ai/api/v2/payments/"
-                    f"{payment_attempt.payment_id}"
+                    f"{locked_attempt.payment_id}"
                 )
 
                 verify_response = requests.get(
@@ -4102,7 +5060,6 @@ class TabbyWebhook(APIView):
                 )
 
                 if verify_response.status_code != 200:
-
                     return Response(
                         {
                             "error": "Unable to verify payment after capture"
@@ -4113,9 +5070,7 @@ class TabbyWebhook(APIView):
                 updated_payment = verify_response.json()
 
                 updated_status = (
-                    updated_payment
-                    .get("status", "")
-                    .upper()
+                    updated_payment.get("status", "").upper()
                 )
 
                 print(
@@ -4123,10 +5078,6 @@ class TabbyWebhook(APIView):
                     updated_status,
                     flush=True
                 )
-
-                # ----------------------------------------------
-                # Payment successfully captured
-                # ----------------------------------------------
 
                 if updated_status == "CLOSED":
 
@@ -4140,8 +5091,10 @@ class TabbyWebhook(APIView):
                             pk=payment_attempt.pk
                         )
 
-                        if locked_order.stock_restored or locked_order.payment_status == "failed":
-
+                        if (
+                            locked_order.stock_restored
+                            or locked_order.payment_status == "failed"
+                        ):
                             print(
                                 f"WARNING: Tabby captured after order failure. "
                                 f"Order: {locked_order.id}, Payment: {payment_id}",
@@ -4168,12 +5121,6 @@ class TabbyWebhook(APIView):
                                     f"Winning Payment: {locked_order.payment_id}",
                                     flush=True
                                 )
-
-                            print(
-                                "ORDER WAS ALREADY PAID:",
-                                locked_order.id,
-                                flush=True
-                            )
 
                         else:
 
@@ -4214,28 +5161,109 @@ class TabbyWebhook(APIView):
                         status=200
                     )
 
-            # ==================================================
-            # 8. Payment rejected
-            # ==================================================
 
-            elif payment_status == "REJECTED":
+            # # ==================================================
+            # # 8. Payment rejected
+            # # ==================================================
 
-                print("TABBY PAYMENT REJECTED:", order.id, flush=True)
+            # elif payment_status == "REJECTED":
 
-                payment_attempt.status = "rejected"
-                payment_attempt.save(update_fields=["status"])
+            #     print("TABBY PAYMENT REJECTED:", order.id, flush=True)
 
-            # ==================================================
-            # 9. Payment expired
-            # ==================================================
+            #     payment_attempt.status = "rejected"
+            #     payment_attempt.save(update_fields=["status"])
+
+            # # ==================================================
+            # # 9. Payment expired
+            # # ==================================================
 
            
-            elif payment_status == "EXPIRED":
+            # elif payment_status == "EXPIRED":
 
-                print("TABBY PAYMENT EXPIRED:", order.id, flush=True)
+            #     print("TABBY PAYMENT EXPIRED:", order.id, flush=True)
 
-                payment_attempt.status = "expired"
-                payment_attempt.save(update_fields=["status"])
+            #     payment_attempt.status = "expired"
+            #     payment_attempt.save(update_fields=["status"])
+
+            # ==================================================
+            # 8. Payment rejected / expired
+            # ==================================================
+
+            elif payment_status in ["REJECTED", "EXPIRED"]:
+
+                attempt_status = (
+                    "rejected"
+                    if payment_status == "REJECTED"
+                    else "expired"
+                )
+
+                with transaction.atomic():
+
+                    locked_order = Order.objects.select_for_update().get(
+                        pk=order.pk
+                    )
+
+                    locked_attempt = PaymentAttempt.objects.select_for_update().get(
+                        pk=payment_attempt.pk
+                    )
+
+                    # Never downgrade a successful or authorized attempt.
+                    if locked_attempt.status in ["completed", "authorized"]:
+
+                        print(
+                            f"Tabby terminal status ignored for "
+                            f"{locked_attempt.status} attempt: {payment_id}",
+                            flush=True
+                        )
+
+                    else:
+
+                        locked_attempt.status = attempt_status
+                        locked_attempt.save(update_fields=["status"])
+
+                        print(
+                            f"TABBY PAYMENT {attempt_status.upper()}: "
+                            f"Order {locked_order.id}",
+                            flush=True
+                        )
+
+                        # Check whether another gateway payment is active.
+                        another_active_attempt = (
+                            locked_order.payment_attempts
+                            .exclude(pk=locked_attempt.pk)
+                            .filter(
+                                status__in=[
+                                    "pending",
+                                    "authorized",
+                                    "completed"
+                                ]
+                            )
+                            .exists()
+                        )
+
+                        if another_active_attempt:
+
+                            print(
+                                f"Stock retained for order {locked_order.id}: "
+                                "another payment attempt is active.",
+                                flush=True
+                            )
+
+                        elif (
+                            locked_order.payment_status != "paid"
+                            and not locked_order.stock_restored
+                        ):
+
+                            restored = release_order_stock(
+                                locked_order.id
+                            )
+
+                            print(
+                                f"TABBY TERMINAL PAYMENT: "
+                                f"Stock restoration result for order "
+                                f"{locked_order.id}: {restored}",
+                                flush=True
+                            )
 
             # ==================================================
             # 10. Other status
