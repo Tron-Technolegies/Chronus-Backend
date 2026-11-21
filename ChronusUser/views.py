@@ -16,8 +16,9 @@ from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from django.db.models import Avg, Count
 from ChronasAdmin.models import ProductColor
-from ChronasAdmin.models import FineArtSize, Frame, Material
+from ChronasAdmin.models import FineArtSize, Frame, Material, ProductSize
 from .models import Address
+
 # ===============================
 # GUEST SESSION
 # ===============================
@@ -48,19 +49,284 @@ def get_cart(request):
 
     return cart
 
+
 # ===============================
 # CART
 # ===============================
-# ===============================
-# CART
-# ===============================
+# @api_view(["POST"])
+# @permission_classes([AllowAny])
+# def add_to_cart(request):
+#     product_id = request.data.get("product_id")
+#     variant_id = request.data.get("variant_id")
+
+#     size_id = request.data.get("size_id")
+#     frame_id = request.data.get("frame_id")
+#     material_id = request.data.get("material_id")
+
+#     try:
+#         qty = int(request.data.get("quantity", 1))
+#     except (TypeError, ValueError):
+#         return Response({"error": "Invalid quantity"}, status=400)
+
+#     if not product_id:
+#         return Response({"error": "product_id required"}, status=400)
+
+#     if qty <= 0:
+#         return Response({"error": "Invalid quantity"}, status=400)
+
+#     cart = get_cart(request)
+#     product = get_object_or_404(Product, id=product_id)
+
+#     # =====================================================
+#     # VARIANT PRODUCTS
+#     # =====================================================
+#     if product.product_type == "variant":
+
+#         if not variant_id:
+#             return Response(
+#                 {"error": "variant_id is required"},
+#                 status=400
+#             )
+
+#         variant = get_object_or_404(
+#             ProductVariant,
+#             id=variant_id,
+#             product=product
+#         )
+
+#         if not variant.is_active:
+#             return Response(
+#                 {"error": "Variant is inactive"},
+#                 status=400
+#             )
+
+#         if variant.stock < qty:
+#             return Response(
+#                 {"error": "Insufficient stock"},
+#                 status=400
+#             )
+
+#         item, created = CartItem.objects.get_or_create(
+#             cart=cart,
+#             product=product,
+#             variant=variant,
+#             defaults={
+#                 "quantity": qty,
+#                 "price": product.price
+#             }
+#         )
+
+#         if not created:
+
+#             if item.quantity + qty > variant.stock:
+#                 return Response(
+#                     {"error": "Insufficient stock"},
+#                     status=400
+#                 )
+
+#             item.quantity += qty
+#             item.price = product.price
+#             item.save()
+
+#         return Response({"message": "Added to cart"})
+
+#     # =====================================================
+#     # FINE ART PRODUCTS (UNCHANGED)
+#     # =====================================================
+
+#     size = None
+#     frame = None
+#     material = None
+
+#     price = product.price
+
+#     if size_id:
+#         size = get_object_or_404(
+#             FineArtSize,
+#             id=size_id,
+#             product=product
+#         )
+#         price = size.price
+
+#     if frame_id:
+#         frame = get_object_or_404(
+#             Frame,
+#             id=frame_id,
+#             products=product
+#         )
+#         price += frame.extra_price
+
+#     if material_id:
+#         material = get_object_or_404(
+#             Material,
+#             id=material_id,
+#             products=product
+#         )
+#         price += material.extra_price
+
+#     item, created = CartItem.objects.get_or_create(
+#         cart=cart,
+#         product=product,
+#         size=size,
+#         frame=frame,
+#         material=material,
+#         defaults={
+#             "quantity": qty,
+#             "price": price
+#         }
+#     )
+
+#     if not created:
+#         item.quantity += qty
+#         item.price = price
+#         item.save()
+
+#     return Response({"message": "Added to cart"})
+
+
+# from ChronusUser.currency import convert_price
+
+# @api_view(["GET"])
+# @permission_classes([AllowAny])
+# def view_cart(request):
+#     currency = request.GET.get(
+#         "currency",
+#         "AED"
+#     ).upper()
+
+#     cart = get_cart(request)
+
+#     items = CartItem.objects.select_related(
+#         "product",
+#         "variant",
+#         "size",
+#         "frame",
+#         "material"
+#     ).prefetch_related(
+#         "variant__options",
+#         "variant__images"
+#     ).filter(cart=cart)
+
+#     subtotal = 0
+#     data = []
+
+#     for item in items:
+
+#         converted_price = convert_price(
+#             item.price,
+#             currency
+#         )
+
+#         total = converted_price * item.quantity
+#         subtotal += total
+
+#         data.append({
+#             "id": item.id,
+
+#             "product_id": item.product.id,
+#             "product": item.product.name,
+#             "product_type": item.product.product_type,
+
+#             "price": round(
+#                 converted_price,
+#                 2
+#             ),
+
+#             "currency": currency,
+
+#             # ------------------------
+#             # Fine Art
+#             # ------------------------
+#             "size": (
+#                 item.size.size
+#                 if item.size
+#                 else None
+#             ),
+
+#             "frame": (
+#                 item.frame.name
+#                 if item.frame
+#                 else None
+#             ),
+
+#             "material": (
+#                 item.material.name
+#                 if item.material
+#                 else None
+#             ),
+
+#             # ------------------------
+#             # Variant
+#             # ------------------------
+#             "variant": (
+#                 {
+#                     "id": item.variant.id,
+#                     "sku": item.variant.sku,
+#                     "stock": item.variant.stock,
+
+#                     "options": [
+#                         {
+#                             "option_name": option.option_name,
+#                             "option_value": option.option_value
+#                         }
+#                         for option in item.variant.options.all()
+#                     ],
+
+#                     "images": [
+#                         image.image.url
+#                         for image in item.variant.images.all()
+#                         if image.image
+#                     ]
+#                 }
+#                 if item.variant
+#                 else None
+#             ),
+
+#             # ------------------------
+#             # Image
+#             # ------------------------
+#             "image": (
+#                 item.variant.images.first().image.url
+#                 if (
+#                     item.variant
+#                     and item.variant.images.exists()
+#                 )
+#                 else (
+#                     item.product.image.url
+#                     if item.product.image
+#                     else None
+#                 )
+#             ),
+
+#             "quantity": item.quantity,
+
+#             "total": round(
+#                 total,
+#                 2
+#             )
+#         })
+
+#     return Response({
+#         "currency": currency,
+#         "items": data,
+#         "subtotal": round(
+#             subtotal,
+#             2
+#         )
+#     })
+
+
+# Add this import alongside your other ChronasAdmin model imports:
+# from ChronasAdmin.models import ProductSize
+
+
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def add_to_cart(request):
     product_id = request.data.get("product_id")
     variant_id = request.data.get("variant_id")
-
-    size_id = request.data.get("size_id")
+    product_size_id = request.data.get("product_size_id")
+    size_id = request.data.get("size_id")  # Existing Fine Art size ID
     frame_id = request.data.get("frame_id")
     material_id = request.data.get("material_id")
 
@@ -78,11 +344,45 @@ def add_to_cart(request):
     cart = get_cart(request)
     product = get_object_or_404(Product, id=product_id)
 
-    # =====================================================
-    # VARIANT PRODUCTS
-    # =====================================================
-    if product.product_type == "variant":
+    # Size-pricing products use ProductSize, not generic ProductVariant.
+    if product.product_type == "variant" and product.has_size_pricing:
+        if not product_size_id:
+            return Response(
+                {"error": "product_size_id is required"},
+                status=400
+            )
 
+        product_size = get_object_or_404(
+            ProductSize,
+            id=product_size_id,
+            product=product
+        )
+
+        if product_size.stock < qty:
+            return Response({"error": "Insufficient stock"}, status=400)
+
+        item, created = CartItem.objects.get_or_create(
+            cart=cart,
+            product=product,
+            product_size=product_size,
+            defaults={
+                "quantity": qty,
+                "price": product_size.price
+            }
+        )
+
+        if not created:
+            if item.quantity + qty > product_size.stock:
+                return Response({"error": "Insufficient stock"}, status=400)
+
+            item.quantity += qty
+            item.price = product_size.price
+            item.save(update_fields=["quantity", "price"])
+
+        return Response({"message": "Added to cart"})
+
+    # Generic SKU variants: existing behaviour retained.
+    if product.product_type == "variant":
         if not variant_id:
             return Response(
                 {"error": "variant_id is required"},
@@ -96,16 +396,10 @@ def add_to_cart(request):
         )
 
         if not variant.is_active:
-            return Response(
-                {"error": "Variant is inactive"},
-                status=400
-            )
+            return Response({"error": "Variant is inactive"}, status=400)
 
         if variant.stock < qty:
-            return Response(
-                {"error": "Insufficient stock"},
-                status=400
-            )
+            return Response({"error": "Insufficient stock"}, status=400)
 
         item, created = CartItem.objects.get_or_create(
             cart=cart,
@@ -118,27 +412,19 @@ def add_to_cart(request):
         )
 
         if not created:
-
             if item.quantity + qty > variant.stock:
-                return Response(
-                    {"error": "Insufficient stock"},
-                    status=400
-                )
+                return Response({"error": "Insufficient stock"}, status=400)
 
             item.quantity += qty
             item.price = product.price
-            item.save()
+            item.save(update_fields=["quantity", "price"])
 
         return Response({"message": "Added to cart"})
 
-    # =====================================================
-    # FINE ART PRODUCTS (UNCHANGED)
-    # =====================================================
-
+    # Fine Art products: existing size/frame/material behaviour retained.
     size = None
     frame = None
     material = None
-
     price = product.price
 
     if size_id:
@@ -180,91 +466,100 @@ def add_to_cart(request):
     if not created:
         item.quantity += qty
         item.price = price
-        item.save()
+        item.save(update_fields=["quantity", "price"])
 
     return Response({"message": "Added to cart"})
 
 
-from ChronusUser.currency import convert_price
-
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def view_cart(request):
-    currency = request.GET.get(
-        "currency",
-        "AED"
-    ).upper()
-
+    currency = request.GET.get("currency", "AED").upper()
     cart = get_cart(request)
 
     items = CartItem.objects.select_related(
         "product",
         "variant",
         "size",
+        "product_size",
+        "product_size__color",
         "frame",
         "material"
     ).prefetch_related(
         "variant__options",
-        "variant__images"
+        "variant__images",
+        "product_size__color__gallery"
     ).filter(cart=cart)
 
     subtotal = 0
     data = []
 
     for item in items:
-
-        converted_price = convert_price(
-            item.price,
-            currency
-        )
-
+        converted_price = convert_price(item.price, currency)
         total = converted_price * item.quantity
         subtotal += total
 
+        selected_color = (
+            item.product_size.color
+            if item.product_size and item.product_size.color
+            else None
+        )
+
+        color_image = None
+        if selected_color:
+            if selected_color.image:
+                color_image = selected_color.image.url
+            else:
+                first_color_image = selected_color.gallery.first()
+                if first_color_image and first_color_image.image:
+                    color_image = first_color_image.image.url
+
+        variant_image = None
+        if item.variant:
+            first_variant_image = item.variant.images.first()
+            if first_variant_image and first_variant_image.image:
+                variant_image = first_variant_image.image.url
+
+        product_image = (
+            item.product.image.url
+            if item.product.image
+            else None
+        )
+
         data.append({
             "id": item.id,
-
             "product_id": item.product.id,
             "product": item.product.name,
             "product_type": item.product.product_type,
-
-            "price": round(
-                converted_price,
-                2
-            ),
-
+            "price": round(converted_price, 2),
             "currency": currency,
 
-            # ------------------------
-            # Fine Art
-            # ------------------------
-            "size": (
-                item.size.size
-                if item.size
+            # Existing Fine Art selection
+            "size": item.size.size if item.size else None,
+            "frame": item.frame.name if item.frame else None,
+            "material": item.material.name if item.material else None,
+
+            # New size-pricing selection
+            "product_size": (
+                {
+                    "id": item.product_size.id,
+                    "size": item.product_size.size,
+                    "color_id": selected_color.id if selected_color else None,
+                    "color_name": (
+                        selected_color.color_name if selected_color else None
+                    ),
+                    "stock": item.product_size.stock
+                }
+                if item.product_size
                 else None
             ),
 
-            "frame": (
-                item.frame.name
-                if item.frame
-                else None
-            ),
-
-            "material": (
-                item.material.name
-                if item.material
-                else None
-            ),
-
-            # ------------------------
-            # Variant
-            # ------------------------
+            # Existing generic SKU variant selection
             "variant": (
                 {
                     "id": item.variant.id,
                     "sku": item.variant.sku,
                     "stock": item.variant.stock,
-
                     "options": [
                         {
                             "option_name": option.option_name,
@@ -272,7 +567,6 @@ def view_cart(request):
                         }
                         for option in item.variant.options.all()
                     ],
-
                     "images": [
                         image.image.url
                         for image in item.variant.images.all()
@@ -283,154 +577,289 @@ def view_cart(request):
                 else None
             ),
 
-            # ------------------------
-            # Image
-            # ------------------------
-            "image": (
-                item.variant.images.first().image.url
-                if (
-                    item.variant
-                    and item.variant.images.exists()
-                )
-                else (
-                    item.product.image.url
-                    if item.product.image
-                    else None
-                )
-            ),
-
+            "image": color_image or variant_image or product_image,
             "quantity": item.quantity,
-
-            "total": round(
-                total,
-                2
-            )
+            "total": round(total, 2)
         })
 
     return Response({
         "currency": currency,
         "items": data,
-        "subtotal": round(
-            subtotal,
-            2
-        )
+        "subtotal": round(subtotal, 2)
     })
 
 
+from django.db import transaction
+from decimal import Decimal
 
-# @api_view(["POST"])
-# @permission_classes([AllowAny])
-# def add_to_cart(request):
-#     product_id = request.data.get("product_id")
-#     size_id = request.data.get("size_id")
-#     frame_id = request.data.get("frame_id")
-#     material_id = request.data.get("material_id")
 
-#     try:
-#         qty = int(request.data.get("quantity", 1))
-#     except (TypeError, ValueError):
-#         return Response({"error": "Invalid quantity"}, status=400)
+@api_view(["POST"])
+@permission_classes([AllowAny])
+@transaction.atomic
+def checkout(request):
+    currency = request.data.get("currency", "AED").upper()
 
-#     if not product_id:
-#         return Response({"error": "product_id required"}, status=400)
+    # 1. Select shipping partner
+    shipping_partner_id = request.data.get("shipping_partner_id")
+    if not shipping_partner_id:
+        return Response(
+            {"error": "Please select a shipping partner"},
+            status=400
+        )
 
-#     if qty <= 0:
-#         return Response({"error": "Invalid quantity"}, status=400)
+    shipping_partner = ShippingPartner.objects.filter(
+        id=shipping_partner_id,
+        availability="available"
+    ).first()
 
-#     cart = get_cart(request)
-#     product = get_object_or_404(Product, id=product_id)
+    if not shipping_partner:
+        return Response(
+            {"error": "Selected shipping partner is unavailable"},
+            status=400
+        )
 
-#     size = None
-#     frame = None
-#     material = None
+    # 2. Get cart
+    cart = get_cart(request)
+    items = CartItem.objects.select_related(
+        "product",
+        "variant",
+        "size",
+        "product_size",
+        "product_size__color",
+        "frame",
+        "material"
+    ).filter(cart=cart)
 
-#     price = product.price
+    if not items.exists():
+        return Response({"error": "Cart is empty"}, status=400)
 
-#     # product-specific size
-#     if size_id:
-#         size = get_object_or_404(FineArtSize, id=size_id, product=product)
-#         price = size.price
+    # 3. Calculate subtotal
+    subtotal = Decimal("0.00")
+    for item in items:
+        subtotal += item.quantity * item.price
 
-#     # only allow frames linked to this product
-#     if frame_id:
-#         frame = get_object_or_404(Frame, id=frame_id, products=product)
-#         price += frame.extra_price
+    # 4. Calculate shipping and total
+    shipping_charge = shipping_partner.shipping_charge
+    total = subtotal + shipping_charge
 
-#     # only allow materials linked to this product
-#     if material_id:
-#         material = get_object_or_404(Material, id=material_id, products=product)
-#         price += material.extra_price
+    # 5. Validate stock and lock the relevant stock rows.
+    stock_updates = []
 
-#     item, created = CartItem.objects.get_or_create(
-#         cart=cart,
-#         product=product,
-#         size=size,
-#         frame=frame,
-#         material=material,
-#         defaults={
-#             "quantity": qty,
-#             "price": price
-#         }
-#     )
+    for item in items:
+        product = item.product
 
-#     if not created:
-#         item.quantity += qty
-#         item.price = price
-#         item.save()
+        # Size-pricing products: stock belongs to ProductSize.
+        if product.product_type == "variant" and product.has_size_pricing:
+            if not item.product_size_id:
+                return Response(
+                    {"error": f"Size selection missing for {product.name}"},
+                    status=400
+                )
 
-#     return Response({"message": "Added to cart"})
+            product_size = ProductSize.objects.select_for_update().filter(
+                id=item.product_size_id,
+                product=product
+            ).first()
 
-# from ChronusUser.currency import convert_price
-# @api_view(["GET"])
-# @permission_classes([AllowAny])
-# def view_cart(request):
-#     currency = request.GET.get(
-#         "currency",
-#         "USD"
-#     ).upper()
-#     cart = get_cart(request)
+            if not product_size:
+                return Response(
+                    {"error": f"Selected size no longer exists for {product.name}"},
+                    status=400
+                )
 
-#     items = CartItem.objects.select_related(
-#         "product", "size", "frame", "material"
-#     ).filter(cart=cart)
+            if product_size.stock < item.quantity:
+                return Response(
+                    {
+                        "error": (
+                            f"Only {product_size.stock} item(s) available "
+                            f"for {product.name}"
+                        )
+                    },
+                    status=400
+                )
 
-#     subtotal = 0
-#     data = []
+            stock_updates.append((product_size, item.quantity))
 
-#     for item in items:
-#         converted_price = convert_price(
-#             item.price,
-#             currency
-#         )
-#         total = converted_price * item.quantity
-#         subtotal += total
+        # Generic SKU variants: existing behaviour retained.
+        elif product.product_type == "variant":
+            if not item.variant_id:
+                return Response(
+                    {"error": f"Variant missing for {product.name}"},
+                    status=400
+                )
 
-#         data.append({
-#             "id": item.id,
-#             "product_id": item.product.id,
-#             "product": item.product.name,
-#             # "price": item.price,
-#             "price": round(
-#                 converted_price,
-#                 2
-#             ),
-#             "currency": currency,
-#             "size": item.size.size if item.size else None,
-#             "frame": item.frame.name if item.frame else None,
-#             "material": item.material.name if item.material else None,
-#             "image": item.product.image.url if item.product.image else None,
-#             "quantity": item.quantity,
-#             "total": total
-#         })
+            variant = ProductVariant.objects.select_for_update().filter(
+                id=item.variant_id,
+                product=product
+            ).first()
 
-#     return Response({
-#         "currency": currency,
-#         "items": data,
-#         "subtotal": round(
-#             subtotal,
-#             2
-#         )
-#     })
+            if not variant:
+                return Response(
+                    {"error": f"Selected variant no longer exists for {product.name}"},
+                    status=400
+                )
+
+            if variant.stock < item.quantity:
+                return Response(
+                    {
+                        "error": (
+                            f"Only {variant.stock} item(s) available "
+                            f"for {product.name}"
+                        )
+                    },
+                    status=400
+                )
+
+            stock_updates.append((variant, item.quantity))
+
+        # Fine Art / ordinary products: existing behaviour retained.
+        else:
+            locked_product = Product.objects.select_for_update().get(
+                id=item.product_id
+            )
+
+            if locked_product.stock < item.quantity:
+                return Response(
+                    {
+                        "error": (
+                            f"Only {locked_product.stock} item(s) available "
+                            f"for {product.name}"
+                        )
+                    },
+                    status=400
+                )
+
+            stock_updates.append((locked_product, item.quantity))
+
+    # 6. Guest checkout
+    guest_id = None
+    if not request.user.is_authenticated:
+        guest_id = (
+            request.headers.get("X-Guest-Id")
+            or request.META.get("HTTP_X_GUEST_ID")
+        )
+        if not guest_id:
+            return Response({"error": "guest_id required"}, status=400)
+
+    # 7. Shipping address
+    address_id = request.data.get("address_id")
+
+    if request.user.is_authenticated and address_id:
+        address = Address.objects.filter(
+            id=address_id,
+            user=request.user
+        ).first()
+
+        if not address:
+            return Response({"error": "Address not found"}, status=404)
+
+        receiver_name = address.full_name
+        address_line_1 = address.address_line_1
+        address_line_2 = address.address_line_2
+        city = address.city
+        state = address.state
+        country = address.country
+        postal_code = address.postal_code
+        phone = address.phone
+
+    else:
+        receiver_name = (
+            f"{request.data.get('first_name', '')} "
+            f"{request.data.get('last_name', '')}"
+        ).strip()
+        phone = request.data.get("phone", "")
+        address_line_1 = request.data.get("address_line_1", "")
+        address_line_2 = request.data.get("address_line_2", "")
+        city = request.data.get("city", "")
+        state = request.data.get("state", "")
+        country = request.data.get("country", "")
+        postal_code = request.data.get("postal_code", "")
+
+    # 8. Validate address
+    if not address_line_1 or not city or not country:
+        return Response({"error": "Shipping address required"}, status=400)
+
+    # 9. Create shipping address string
+    shipping_address = (
+        f"{receiver_name}, {address_line_1}, {address_line_2}, "
+        f"{city}, {state}, {country}, {postal_code}"
+    )
+
+    # 10. Create order
+    order = Order.objects.create(
+        user=request.user if request.user.is_authenticated else None,
+        guest_id=guest_id,
+        email=request.data.get("email"),
+        phone=phone,
+        receiver_name=receiver_name,
+        address_line_1=address_line_1,
+        address_line_2=address_line_2,
+        city=city,
+        state=state,
+        country=country,
+        postal_code=postal_code,
+        shipping_address=shipping_address,
+        shipping_partner=shipping_partner,
+        shipping_charge=shipping_charge,
+        total_amount=total,
+        currency=currency
+    )
+
+    # 11. Create notification
+    Notification.objects.create(
+        title="New Order Received",
+        message=(
+            f"Order #{order.id} has been placed for "
+            f"{order.total_amount}"
+        )
+    )
+
+    # 12. Create order items, preserving selected ProductSize.
+    order_items = []
+    for item in items:
+        order_items.append(
+            OrderItem(
+                order=order,
+                product=item.product,
+                variant=item.variant,
+                size=item.size,
+                product_size=item.product_size,
+                frame=item.frame,
+                material=item.material,
+                quantity=item.quantity,
+                price=item.price
+            )
+        )
+
+    OrderItem.objects.bulk_create(order_items)
+
+    # 13. Deduct stock from the exact selected stock record.
+    for stock_object, quantity in stock_updates:
+        stock_object.stock -= quantity
+        stock_object.save(update_fields=["stock"])
+
+    # 14. Currency conversion
+    converted_subtotal = convert_price(subtotal, currency)
+    converted_shipping = convert_price(shipping_charge, currency)
+    converted_total = convert_price(total, currency)
+
+    # 15. Response
+    return Response(
+        {
+            "order_id": order.id,
+            "subtotal": converted_subtotal,
+            "shipping_partner": {
+                "id": shipping_partner.id,
+                "name": shipping_partner.name
+            },
+            "shipping_charge": converted_shipping,
+            "amount": converted_total,
+            "currency": currency,
+            "display_amount": converted_total
+        },
+        status=201
+    )
+
 
 
 @api_view(["DELETE"])
@@ -576,9 +1005,13 @@ def delete_review(request, review_id):
             status=404
         )
 from decimal import Decimal
-    
+ 
+
+# from django.db import transaction
+
 # @api_view(["POST"])
 # @permission_classes([AllowAny])
+# @transaction.atomic
 # def checkout(request):
 
 #     currency = request.data.get(
@@ -586,19 +1019,19 @@ from decimal import Decimal
 #         "AED"
 #     ).upper()
 
-#     # Selected shipping partner
+#     # ----------------------------------
+#     # 1. SELECT SHIPPING PARTNER
+#     # ----------------------------------
 
 #     shipping_partner_id = request.data.get(
 #         "shipping_partner_id"
 #     )
 
 #     if not shipping_partner_id:
-
 #         return Response(
 #             {"error": "Please select a shipping partner"},
 #             status=400
 #         )
-
 
 #     shipping_partner = ShippingPartner.objects.filter(
 #         id=shipping_partner_id,
@@ -606,11 +1039,14 @@ from decimal import Decimal
 #     ).first()
 
 #     if not shipping_partner:
-
 #         return Response(
 #             {"error": "Selected shipping partner is unavailable"},
 #             status=400
 #         )
+
+#     # ----------------------------------
+#     # 2. GET CART
+#     # ----------------------------------
 
 #     cart = get_cart(request)
 
@@ -629,64 +1065,136 @@ from decimal import Decimal
 #             {"error": "Cart is empty"},
 #             status=400
 #         )
-#     # Calculate product subtotal
+
+#     # ----------------------------------
+#     # 3. CALCULATE SUBTOTAL
+#     # ----------------------------------
 
 #     subtotal = Decimal("0.00")
 
 #     for item in items:
 
-#         subtotal += item.quantity * item.price
+#         subtotal += (
+#             item.quantity * item.price
+#         )
 
+#     # ----------------------------------
+#     # 4. CALCULATE SHIPPING AND TOTAL
+#     # ----------------------------------
 
-#         # Get shipping charge from selected partner
+#     shipping_charge = (
+#         shipping_partner.shipping_charge
+#     )
 
-#         shipping_charge = shipping_partner.shipping_charge
+#     total = subtotal + shipping_charge
 
+#     # # ----------------------------------
+#     # # 5. VALIDATE STOCK
+#     # # ----------------------------------
 
-#         # Calculate final order amount
+#     # for item in items:
 
-#         total = subtotal + shipping_charge
+#     #     # VARIANT PRODUCTS
 
+#     #     if item.product.product_type == "variant":
 
+#     #         if not item.variant:
 
-#         # variant products
+#     #             return Response(
+#     #                 {
+#     #                     "error": (
+#     #                         f"Variant missing for "
+#     #                         f"{item.product.name}"
+#     #                     )
+#     #                 },
+#     #                 status=400
+#     #             )
+
+#     #         if item.variant.stock < item.quantity:
+
+#     #             return Response(
+#     #                 {
+#     #                     "error": (
+#     #                         f"Only {item.variant.stock} "
+#     #                         f"item(s) available for "
+#     #                         f"{item.product.name}"
+#     #                     )
+#     #                 },
+#     #                 status=400
+#     #             )
+
+#     #     # FINE ART PRODUCTS
+
+#     #     else:
+
+#     #         if item.product.stock < item.quantity:
+
+#     #             return Response(
+#     #                 {
+#     #                     "error": (
+#     #                         f"Only {item.product.stock} "
+#     #                         f"item(s) available for "
+#     #                         f"{item.product.name}"
+#     #                     )
+#     #                 },
+#     #                 status=400
+#     #             )
+#     # ----------------------------------
+#     # 5. VALIDATE STOCK WITH ROW LOCKS
+#     # ----------------------------------
+
+#     stock_updates = []
+
+#     for item in items:
+
 #         if item.product.product_type == "variant":
+
 #             if not item.variant:
 #                 return Response(
 #                     {
-#                         "error":(
-#                             f"variant missing for "
-#                             f"{item.product.name}"
-#                         )
+#                         "error": f"Variant missing for {item.product.name}"
 #                     },
 #                     status=400
 #                 )
-#             if item.variant.stock < item.quantity:
+
+#             variant = ProductVariant.objects.select_for_update().get(
+#                 id=item.variant_id
+#             )
+
+#             if variant.stock < item.quantity:
 #                 return Response(
 #                     {
 #                         "error": (
-#                         f"Only {item.variant.stock} "
-#                         f"item(s) available for "
-#                         f"{item.product.name}"
-#                         )
-#                     },
-#                     status=400
-#                 )
-#         # fineart
-#         else:
-#             if item.product.stock < item.quantity:
-#                 return Response(
-#                     {
-#                         "error": (
-#                             f"Only {item.product.stock} "
-#                             f"item(s) available for "
-#                             f"{item.product.name}"
+#                             f"Only {variant.stock} item(s) available "
+#                             f"for {item.product.name}"
 #                         )
 #                     },
 #                     status=400
 #                 )
 
-            
+#             stock_updates.append((variant, item.quantity))
+
+#         else:
+
+#             product = Product.objects.select_for_update().get(
+#                 id=item.product_id
+#             )
+
+#             if product.stock < item.quantity:
+#                 return Response(
+#                     {
+#                         "error": (
+#                             f"Only {product.stock} item(s) available "
+#                             f"for {item.product.name}"
+#                         )
+#                     },
+#                     status=400
+#                 )
+
+#             stock_updates.append((product, item.quantity))
+#     # ----------------------------------
+#     # 6. GUEST CHECKOUT
+#     # ----------------------------------
 
 #     guest_id = None
 
@@ -697,16 +1205,22 @@ from decimal import Decimal
 #         )
 
 #         if not guest_id:
+
 #             return Response(
 #                 {"error": "guest_id required"},
 #                 status=400
 #             )
+
+#     # ----------------------------------
+#     # 7. SHIPPING ADDRESS
+#     # ----------------------------------
 
 #     address_id = request.data.get(
 #         "address_id"
 #     )
 
 #     # Logged-in user using saved address
+
 #     if request.user.is_authenticated and address_id:
 
 #         address = Address.objects.filter(
@@ -715,14 +1229,13 @@ from decimal import Decimal
 #         ).first()
 
 #         if not address:
+
 #             return Response(
 #                 {"error": "Address not found"},
 #                 status=404
 #             )
 
-
 #         receiver_name = address.full_name
-
 
 #         address_line_1 = address.address_line_1
 #         address_line_2 = address.address_line_2
@@ -732,27 +1245,21 @@ from decimal import Decimal
 #         country = address.country
 #         postal_code = address.postal_code
 
-#         shipping_address = (
-#             f"{receiver_name}, "
-#             f"{address_line_1}, "
-#             f"{address_line_2}, "
-#             f"{city}, "
-#             f"{state}, "
-#             f"{country}, "
-#             f"{postal_code}"
-#         )
-
 #         phone = address.phone
 
-#     # Guest checkout OR logged-in user manual address
+#     # Guest checkout OR manual address
+
 #     else:
 
 #         receiver_name = (
-#             f"{request.data.get('first_name','')} "
-#             f"{request.data.get('last_name','')}"
+#             f"{request.data.get('first_name', '')} "
+#             f"{request.data.get('last_name', '')}"
 #         ).strip()
 
-#         phone = request.data.get("phone","")
+#         phone = request.data.get(
+#             "phone",
+#             ""
+#         )
 
 #         address_line_1 = request.data.get(
 #             "address_line_1",
@@ -764,31 +1271,56 @@ from decimal import Decimal
 #             ""
 #         )
 
-#         city = request.data.get("city","")
+#         city = request.data.get(
+#             "city",
+#             ""
+#         )
 
-#         state = request.data.get("state","")
+#         state = request.data.get(
+#             "state",
+#             ""
+#         )
 
-#         country = request.data.get("country","")
+#         country = request.data.get(
+#             "country",
+#             ""
+#         )
 
 #         postal_code = request.data.get(
 #             "postal_code",
 #             ""
 #         )
 
-#         shipping_address = (
-#             f"{receiver_name}, "
-#             f"{address_line_1}, "
-#             f"{address_line_2}, "
-#             f"{city}, "
-#             f"{state}, "
-#             f"{country}, "
-#             f"{postal_code}"
+#     # ----------------------------------
+#     # 8. VALIDATE ADDRESS
+#     # ----------------------------------
+
+#     if not address_line_1 or not city or not country:
+
+#         return Response(
+#             {
+#                 "error": "Shipping address required"
+#             },
+#             status=400
 #         )
-#         if not shipping_address:
-#             return Response(
-#                 {"error": "shipping address required"},
-#                 status=400
-#             )
+
+#     # ----------------------------------
+#     # 9. CREATE SHIPPING ADDRESS STRING
+#     # ----------------------------------
+
+#     shipping_address = (
+#         f"{receiver_name}, "
+#         f"{address_line_1}, "
+#         f"{address_line_2}, "
+#         f"{city}, "
+#         f"{state}, "
+#         f"{country}, "
+#         f"{postal_code}"
+#     )
+
+#     # ----------------------------------
+#     # 10. CREATE ORDER
+#     # ----------------------------------
 
 #     order = Order.objects.create(
 
@@ -800,7 +1332,9 @@ from decimal import Decimal
 
 #         guest_id=guest_id,
 
-#         email=request.data.get("email"),
+#         email=request.data.get(
+#             "email"
+#         ),
 
 #         phone=phone,
 
@@ -815,68 +1349,110 @@ from decimal import Decimal
 #         postal_code=postal_code,
 
 #         shipping_address=shipping_address,
-        
-#         subtotal=subtotal,
 
-#         total_amount=total,
-
-#         currency=currency,
-#         shipping_address=shipping_address,
-
-#         subtotal=subtotal,
-#         shipping_charge=shipping_charge,
 #         shipping_partner=shipping_partner,
+
+#         shipping_charge=shipping_charge,
 
 #         total_amount=total,
 
 #         currency=currency
-        
+
 #     )
 
+#     # ----------------------------------
+#     # 11. CREATE NOTIFICATION
+#     # ----------------------------------
+
 #     Notification.objects.create(
+
 #         title="New Order Received",
+
 #         message=(
 #             f"Order #{order.id} "
 #             f"has been placed for "
 #             f"{order.total_amount}"
 #         )
+
 #     )
 
+#     # ----------------------------------
+#     # 12. CREATE ORDER ITEMS
+#     # ----------------------------------
 
 #     order_items = []
+
 #     for item in items:
+
 #         order_items.append(
+
 #             OrderItem(
-#                 order = order,
-#                 product = item.product,
-#                 variant = item.variant,
+
+#                 order=order,
+
+#                 product=item.product,
+
+#                 variant=item.variant,
+
 #                 size=item.size,
+
 #                 frame=item.frame,
+
 #                 material=item.material,
+
 #                 quantity=item.quantity,
+
 #                 price=item.price
 
 #             )
+
 #         )
 
 #     OrderItem.objects.bulk_create(
 #         order_items
 #     )
 
-#     for item in items:
-#         if item.product.product_type == "variant":
+#     # # ----------------------------------
+#     # # 13. DEDUCT STOCK
+#     # # ----------------------------------
 
-#             item.variant.stock -= item.quantity
-#             item.variant.save(
-#                 update_fields=["stock"]
-#             )
-        
-#         else:
+#     # for item in items:
 
-#             item.product.stock -= item.quantity
-#             item.product.save(
-#                 update_fields=["stock"]
-#             )
+#     #     # VARIANT PRODUCTS
+
+#     #     if item.product.product_type == "variant":
+
+#     #         item.variant.stock -= item.quantity
+
+#     #         item.variant.save(
+#     #             update_fields=["stock"]
+#     #         )
+
+#     #     # FINE ART PRODUCTS
+
+#     #     else:
+
+#     #         item.product.stock -= item.quantity
+
+#     #         item.product.save(
+#     #             update_fields=["stock"]
+#     #         )
+
+
+#     # ----------------------------------
+#     # 13. DEDUCT STOCK
+#     # ----------------------------------
+
+#     for stock_object, quantity in stock_updates:
+
+#         stock_object.stock -= quantity
+
+#         stock_object.save(
+#             update_fields=["stock"]
+#         )
+#     # ----------------------------------
+#     # 14. CURRENCY CONVERSION
+#     # ----------------------------------
 
 #     converted_subtotal = convert_price(
 #         subtotal,
@@ -893,520 +1469,39 @@ from decimal import Decimal
 #         currency
 #     )
 
-#     return Response({
-#         "order_id": order.id,
+#     # ----------------------------------
+#     # 15. RESPONSE
+#     # ----------------------------------
 
-#         "subtotal": converted_subtotal,
-#         "shipping_partner": {
-#         "id": shipping_partner.id,
-#         "name": shipping_partner.name
+#     return Response(
+
+#         {
+
+#             "order_id": order.id,
+
+#             "subtotal": converted_subtotal,
+
+#             "shipping_partner": {
+
+#                 "id": shipping_partner.id,
+
+#                 "name": shipping_partner.name
+
+#             },
+
+#             "shipping_charge": converted_shipping,
+
+#             "amount": converted_total,
+
+#             "currency": currency,
+
+#             "display_amount": converted_total
+
 #         },
 
-#         "shipping_charge": converted_shipping,
+#         status=201
 
-#         "amount": converted_total,
-
-#         "currency": currency,
-
-#         "display_amount": converted_total
-#     })
-
-
-from django.db import transaction
-
-@api_view(["POST"])
-@permission_classes([AllowAny])
-@transaction.atomic
-def checkout(request):
-
-    currency = request.data.get(
-        "currency",
-        "AED"
-    ).upper()
-
-    # ----------------------------------
-    # 1. SELECT SHIPPING PARTNER
-    # ----------------------------------
-
-    shipping_partner_id = request.data.get(
-        "shipping_partner_id"
-    )
-
-    if not shipping_partner_id:
-        return Response(
-            {"error": "Please select a shipping partner"},
-            status=400
-        )
-
-    shipping_partner = ShippingPartner.objects.filter(
-        id=shipping_partner_id,
-        availability="available"
-    ).first()
-
-    if not shipping_partner:
-        return Response(
-            {"error": "Selected shipping partner is unavailable"},
-            status=400
-        )
-
-    # ----------------------------------
-    # 2. GET CART
-    # ----------------------------------
-
-    cart = get_cart(request)
-
-    items = CartItem.objects.select_related(
-        "product",
-        "variant",
-        "size",
-        "frame",
-        "material"
-    ).filter(
-        cart=cart
-    )
-
-    if not items.exists():
-        return Response(
-            {"error": "Cart is empty"},
-            status=400
-        )
-
-    # ----------------------------------
-    # 3. CALCULATE SUBTOTAL
-    # ----------------------------------
-
-    subtotal = Decimal("0.00")
-
-    for item in items:
-
-        subtotal += (
-            item.quantity * item.price
-        )
-
-    # ----------------------------------
-    # 4. CALCULATE SHIPPING AND TOTAL
-    # ----------------------------------
-
-    shipping_charge = (
-        shipping_partner.shipping_charge
-    )
-
-    total = subtotal + shipping_charge
-
-    # # ----------------------------------
-    # # 5. VALIDATE STOCK
-    # # ----------------------------------
-
-    # for item in items:
-
-    #     # VARIANT PRODUCTS
-
-    #     if item.product.product_type == "variant":
-
-    #         if not item.variant:
-
-    #             return Response(
-    #                 {
-    #                     "error": (
-    #                         f"Variant missing for "
-    #                         f"{item.product.name}"
-    #                     )
-    #                 },
-    #                 status=400
-    #             )
-
-    #         if item.variant.stock < item.quantity:
-
-    #             return Response(
-    #                 {
-    #                     "error": (
-    #                         f"Only {item.variant.stock} "
-    #                         f"item(s) available for "
-    #                         f"{item.product.name}"
-    #                     )
-    #                 },
-    #                 status=400
-    #             )
-
-    #     # FINE ART PRODUCTS
-
-    #     else:
-
-    #         if item.product.stock < item.quantity:
-
-    #             return Response(
-    #                 {
-    #                     "error": (
-    #                         f"Only {item.product.stock} "
-    #                         f"item(s) available for "
-    #                         f"{item.product.name}"
-    #                     )
-    #                 },
-    #                 status=400
-    #             )
-    # ----------------------------------
-    # 5. VALIDATE STOCK WITH ROW LOCKS
-    # ----------------------------------
-
-    stock_updates = []
-
-    for item in items:
-
-        if item.product.product_type == "variant":
-
-            if not item.variant:
-                return Response(
-                    {
-                        "error": f"Variant missing for {item.product.name}"
-                    },
-                    status=400
-                )
-
-            variant = ProductVariant.objects.select_for_update().get(
-                id=item.variant_id
-            )
-
-            if variant.stock < item.quantity:
-                return Response(
-                    {
-                        "error": (
-                            f"Only {variant.stock} item(s) available "
-                            f"for {item.product.name}"
-                        )
-                    },
-                    status=400
-                )
-
-            stock_updates.append((variant, item.quantity))
-
-        else:
-
-            product = Product.objects.select_for_update().get(
-                id=item.product_id
-            )
-
-            if product.stock < item.quantity:
-                return Response(
-                    {
-                        "error": (
-                            f"Only {product.stock} item(s) available "
-                            f"for {item.product.name}"
-                        )
-                    },
-                    status=400
-                )
-
-            stock_updates.append((product, item.quantity))
-    # ----------------------------------
-    # 6. GUEST CHECKOUT
-    # ----------------------------------
-
-    guest_id = None
-
-    if not request.user.is_authenticated:
-
-        guest_id = request.headers.get(
-            "X-Guest-Id"
-        )
-
-        if not guest_id:
-
-            return Response(
-                {"error": "guest_id required"},
-                status=400
-            )
-
-    # ----------------------------------
-    # 7. SHIPPING ADDRESS
-    # ----------------------------------
-
-    address_id = request.data.get(
-        "address_id"
-    )
-
-    # Logged-in user using saved address
-
-    if request.user.is_authenticated and address_id:
-
-        address = Address.objects.filter(
-            id=address_id,
-            user=request.user
-        ).first()
-
-        if not address:
-
-            return Response(
-                {"error": "Address not found"},
-                status=404
-            )
-
-        receiver_name = address.full_name
-
-        address_line_1 = address.address_line_1
-        address_line_2 = address.address_line_2
-
-        city = address.city
-        state = address.state
-        country = address.country
-        postal_code = address.postal_code
-
-        phone = address.phone
-
-    # Guest checkout OR manual address
-
-    else:
-
-        receiver_name = (
-            f"{request.data.get('first_name', '')} "
-            f"{request.data.get('last_name', '')}"
-        ).strip()
-
-        phone = request.data.get(
-            "phone",
-            ""
-        )
-
-        address_line_1 = request.data.get(
-            "address_line_1",
-            ""
-        )
-
-        address_line_2 = request.data.get(
-            "address_line_2",
-            ""
-        )
-
-        city = request.data.get(
-            "city",
-            ""
-        )
-
-        state = request.data.get(
-            "state",
-            ""
-        )
-
-        country = request.data.get(
-            "country",
-            ""
-        )
-
-        postal_code = request.data.get(
-            "postal_code",
-            ""
-        )
-
-    # ----------------------------------
-    # 8. VALIDATE ADDRESS
-    # ----------------------------------
-
-    if not address_line_1 or not city or not country:
-
-        return Response(
-            {
-                "error": "Shipping address required"
-            },
-            status=400
-        )
-
-    # ----------------------------------
-    # 9. CREATE SHIPPING ADDRESS STRING
-    # ----------------------------------
-
-    shipping_address = (
-        f"{receiver_name}, "
-        f"{address_line_1}, "
-        f"{address_line_2}, "
-        f"{city}, "
-        f"{state}, "
-        f"{country}, "
-        f"{postal_code}"
-    )
-
-    # ----------------------------------
-    # 10. CREATE ORDER
-    # ----------------------------------
-
-    order = Order.objects.create(
-
-        user=(
-            request.user
-            if request.user.is_authenticated
-            else None
-        ),
-
-        guest_id=guest_id,
-
-        email=request.data.get(
-            "email"
-        ),
-
-        phone=phone,
-
-        receiver_name=receiver_name,
-
-        address_line_1=address_line_1,
-        address_line_2=address_line_2,
-
-        city=city,
-        state=state,
-        country=country,
-        postal_code=postal_code,
-
-        shipping_address=shipping_address,
-
-        shipping_partner=shipping_partner,
-
-        shipping_charge=shipping_charge,
-
-        total_amount=total,
-
-        currency=currency
-
-    )
-
-    # ----------------------------------
-    # 11. CREATE NOTIFICATION
-    # ----------------------------------
-
-    Notification.objects.create(
-
-        title="New Order Received",
-
-        message=(
-            f"Order #{order.id} "
-            f"has been placed for "
-            f"{order.total_amount}"
-        )
-
-    )
-
-    # ----------------------------------
-    # 12. CREATE ORDER ITEMS
-    # ----------------------------------
-
-    order_items = []
-
-    for item in items:
-
-        order_items.append(
-
-            OrderItem(
-
-                order=order,
-
-                product=item.product,
-
-                variant=item.variant,
-
-                size=item.size,
-
-                frame=item.frame,
-
-                material=item.material,
-
-                quantity=item.quantity,
-
-                price=item.price
-
-            )
-
-        )
-
-    OrderItem.objects.bulk_create(
-        order_items
-    )
-
-    # # ----------------------------------
-    # # 13. DEDUCT STOCK
-    # # ----------------------------------
-
-    # for item in items:
-
-    #     # VARIANT PRODUCTS
-
-    #     if item.product.product_type == "variant":
-
-    #         item.variant.stock -= item.quantity
-
-    #         item.variant.save(
-    #             update_fields=["stock"]
-    #         )
-
-    #     # FINE ART PRODUCTS
-
-    #     else:
-
-    #         item.product.stock -= item.quantity
-
-    #         item.product.save(
-    #             update_fields=["stock"]
-    #         )
-
-
-    # ----------------------------------
-    # 13. DEDUCT STOCK
-    # ----------------------------------
-
-    for stock_object, quantity in stock_updates:
-
-        stock_object.stock -= quantity
-
-        stock_object.save(
-            update_fields=["stock"]
-        )
-    # ----------------------------------
-    # 14. CURRENCY CONVERSION
-    # ----------------------------------
-
-    converted_subtotal = convert_price(
-        subtotal,
-        currency
-    )
-
-    converted_shipping = convert_price(
-        shipping_charge,
-        currency
-    )
-
-    converted_total = convert_price(
-        total,
-        currency
-    )
-
-    # ----------------------------------
-    # 15. RESPONSE
-    # ----------------------------------
-
-    return Response(
-
-        {
-
-            "order_id": order.id,
-
-            "subtotal": converted_subtotal,
-
-            "shipping_partner": {
-
-                "id": shipping_partner.id,
-
-                "name": shipping_partner.name
-
-            },
-
-            "shipping_charge": converted_shipping,
-
-            "amount": converted_total,
-
-            "currency": currency,
-
-            "display_amount": converted_total
-
-        },
-
-        status=201
-
-    )
+#     )
 
 
 # ===============================
@@ -1417,36 +1512,79 @@ def checkout(request):
 @permission_classes([IsAuthenticated])
 def my_orders(request):
 
-    orders = Order.objects.prefetch_related("items__product").filter(user=request.user)
+    orders = (
+        Order.objects
+        .prefetch_related(
+            "items__product",
+            "items__product_size",
+            "items__product_size__color",
+        )
+        .filter(user=request.user)
+    )
 
     data = []
 
     for order in orders:
 
         items = []
+
         for item in order.items.all():
-            items.append({
+
+            product_size = getattr(item, "product_size", None)
+
+            color = (
+                product_size.color
+                if product_size and product_size.color_id
+                else None
+            )
+
+            # Prefer the selected colour's image.
+            product_image = None
+
+            if color and color.image:
+                product_image = color.image.url
+
+            elif item.product.image:
+                product_image = item.product.image.url
+
+            item_data = {
                 "product_name": item.product.name,
                 "quantity": item.quantity,
-                "product_image": (
-                    item.product.image.url
-                    if item.product.image else None
-                ),
+                "product_image": product_image,
+
                 "price": convert_price(
                     item.price,
                     order.currency
                 ),
-                "currency": order.currency
-            })
+
+                "currency": order.currency,
+
+                # New size-pricing details
+                "product_size": None,
+                "size": None,
+                "color_id": None,
+                "color_name": None,
+            }
+
+            if product_size:
+                item_data.update({
+                    "product_size": product_size.id,
+                    "size": product_size.size,
+                    "color_id": color.id if color else None,
+                    "color_name": color.color_name if color else None,
+                })
+
+            items.append(item_data)
 
         data.append({
             "id": order.id,
             "status": order.status,
-           
+
             "total_amount": convert_price(
                 order.total_amount,
                 order.currency
-                ),
+            ),
+
             "currency": order.currency,
             "created_at": order.created_at,
 
@@ -1471,6 +1609,66 @@ def my_orders(request):
         })
 
     return Response({"orders": data})
+
+
+# @api_view(["GET"])
+# @permission_classes([IsAuthenticated])
+# def my_orders(request):
+
+#     orders = Order.objects.prefetch_related("items__product").filter(user=request.user)
+
+#     data = []
+
+#     for order in orders:
+
+#         items = []
+#         for item in order.items.all():
+#             items.append({
+#                 "product_name": item.product.name,
+#                 "quantity": item.quantity,
+#                 "product_image": (
+#                     item.product.image.url
+#                     if item.product.image else None
+#                 ),
+#                 "price": convert_price(
+#                     item.price,
+#                     order.currency
+#                 ),
+#                 "currency": order.currency
+#             })
+
+#         data.append({
+#             "id": order.id,
+#             "status": order.status,
+           
+#             "total_amount": convert_price(
+#                 order.total_amount,
+#                 order.currency
+#                 ),
+#             "currency": order.currency,
+#             "created_at": order.created_at,
+
+#             "tracking_link": order.tracking_link,
+#             "tracking_number": order.tracking_number,
+#             "carrier": order.carrier,
+#             "shipment_id": order.shipment_id,
+#             "shipped_at": order.shipped_at,
+
+#             "items": items,
+
+#             # Shipping Details
+#             "receiver_name": order.receiver_name,
+#             "phone": order.phone,
+#             "address_line_1": order.address_line_1,
+#             "address_line_2": order.address_line_2,
+#             "city": order.city,
+#             "state": order.state,
+#             "country": order.country,
+#             "postal_code": order.postal_code,
+#             "shipping_address": order.shipping_address
+#         })
+
+#     return Response({"orders": data})
 
 
 
@@ -1627,11 +1825,14 @@ def login(request):
         "tokens": tokens
     })
 
-from django.db.models import Q, Avg, Count
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_http_methods
-from ChronusUser.currency import convert_price, convert_to_aed
+# Replace only the existing view_products() and view_single_product() functions.
+# Keep your existing imports. These functions use the existing convert_price,
+# convert_to_aed, Q, Avg, Count, Product, Review and related model imports.
+
+# Replace only the existing view_products() and view_single_product() functions.
+# Keep your existing imports. These functions use the existing convert_price,
+# convert_to_aed, Q, Avg, Count, Product, Review and related model imports.
+
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_products(request):
@@ -1640,8 +1841,7 @@ def view_products(request):
     search = request.GET.get("search")
     min_price = request.GET.get("min_price")
     max_price = request.GET.get("max_price")
-
-    currency = request.GET.get("currency", "AED").upper()   #newwww
+    currency = request.GET.get("currency", "AED").upper()
 
     try:
         page = int(request.GET.get("page", 1))
@@ -1650,35 +1850,39 @@ def view_products(request):
         return JsonResponse({"error": "Invalid pagination values"}, status=400)
 
     if page < 1 or limit < 1:
-        return JsonResponse({"error": "Page and limit must be greater than 0"}, status=400)
+        return JsonResponse(
+            {"error": "Page and limit must be greater than 0"},
+            status=400
+        )
 
     offset = (page - 1) * limit
 
     products = Product.objects.filter(is_published=True).select_related(
         "category", "subcategory", "brand"
     ).prefetch_related(
-        "sizes",
-        "colors",
+        "sizes",                 # FineArtSize; preserve existing Fine Art data
+        "colors__gallery",       # ProductColorImage gallery
+        "colors__sizes",         # ProductSize rows linked to each colour
+        "product_sizes__color",  # All ProductSize rows for size-pricing products
         "gallery",
         "frames",
-        "materials"
+        "materials",
+        "variants__options",
+        "variants__images"
     )
 
-    # CATEGORY FILTER
     if category:
         if category.isdigit():
             products = products.filter(category__id=category)
         else:
             products = products.filter(category__name__icontains=category)
 
-    # SUBCATEGORY FILTER
     if subcategory:
         if subcategory.isdigit():
             products = products.filter(subcategory__id=subcategory)
         else:
             products = products.filter(subcategory__name__icontains=subcategory)
 
-    # SEARCH
     if search:
         products = products.filter(
             Q(name__icontains=search) |
@@ -1687,41 +1891,117 @@ def view_products(request):
             Q(subcategory__name__icontains=search)
         )
 
-    # PRICE FILTER
-    # if min_price:
-    #     products = products.filter(price__gte=min_price)
-
-    # if max_price:
-    #     products = products.filter(price__lte=max_price)
-
-
-    # UPDATED PRICE FILTER BASED ON CURRENCY
     try:
         if min_price:
-            min_price_aed =convert_to_aed(float(min_price),currency)
+            min_price_aed = convert_to_aed(float(min_price), currency)
             products = products.filter(price__gte=min_price_aed)
         if max_price:
-            max_price_aed = convert_to_aed(float(max_price),currency)
+            max_price_aed = convert_to_aed(float(max_price), currency)
             products = products.filter(price__lte=max_price_aed)
-    except ValueError:
+    except (ValueError, TypeError):
         return JsonResponse(
             {"error": "Invalid price or currency"},
             status=400
         )
 
-
-
     total_products = products.count()
     total_pages = (total_products + limit - 1) // limit
-
     products = products[offset:offset + limit]
 
     data = []
 
     for product in products:
+        is_size_pricing = bool(product.has_size_pricing)
+        is_generic_variant = (
+            product.product_type == "variant" and not is_size_pricing
+        )
+
+        # Existing Fine Art sizes. Do not mix these with ProductSize rows.
+        fine_art_sizes = [
+            {
+                "size": s.size,
+                "price": convert_price(s.price, currency)
+            }
+            for s in product.sizes.all()
+        ]
+
+        # New size-pricing rows (size-only or colour + size).
+        product_sizes = []
+        if is_size_pricing:
+            product_sizes = [
+                {
+                    "id": size.id,
+                    "color_id": size.color_id,
+                    "color_name": (
+                        size.color.color_name
+                        if size.color else None
+                    ),
+                    "size": size.size,
+                    "price": convert_price(size.price, currency),
+                    "stock": size.stock,
+                }
+                for size in product.product_sizes.all()
+            ]
+
+        colors = []
+        for color in product.colors.all():
+            color_sizes = []
+            if is_size_pricing:
+                color_sizes = [
+                    {
+                        "id": size.id,
+                        "size": size.size,
+                        "price": convert_price(size.price, currency),
+                        "stock": size.stock,
+                    }
+                    for size in color.sizes.all()
+                ]
+
+            colors.append({
+                "id": color.id,
+                "color_name": color.color_name,
+                "image": color.image.url if color.image else None,
+                "gallery": [
+                    {
+                        "id": image.id,
+                        "image": image.image.url if image.image else None,
+                        "order": image.order,
+                    }
+                    for image in color.gallery.all()
+                    if image.image
+                ],
+                "sizes": color_sizes,
+            })
+
+        variants = []
+        if is_generic_variant:
+            variants = [
+                {
+                    "id": variant.id,
+                    "sku": variant.sku,
+                    "stock": variant.stock,
+                    "is_active": variant.is_active,
+                    "options": [
+                        {
+                            "option_name": option.option_name,
+                            "option_value": option.option_value,
+                        }
+                        for option in variant.options.all()
+                    ],
+                    "images": [
+                        image.image.url
+                        for image in variant.images.all()
+                        if image.image
+                    ],
+                }
+                for variant in product.variants.filter(is_active=True)
+            ]
+
         data.append({
             "id": product.id,
             "name": product.name,
+            "product_type": product.product_type,
+            "has_size_pricing": is_size_pricing,
 
             "category": {
                 "id": product.category.id,
@@ -1738,11 +2018,7 @@ def view_products(request):
                 "name": product.brand.name
             } if product.brand else None,
 
-            # "price": str(product.price),
-            "price": convert_price(
-                product.price,
-                currency
-            ),
+            "price": convert_price(product.price, currency),
             "currency": currency,
             "description": product.description,
             "stock": product.stock,
@@ -1752,26 +2028,9 @@ def view_products(request):
             "is_best_seller": product.is_best_seller,
             "specification": product.specification,
 
-            "sizes": [
-                {
-                    "size": s.size,
-                    # "price": str(s.price)
-                    "price": convert_price(
-                        s.price,
-                        currency
-                    )
-                }
-                for s in product.sizes.all()
-            ],
-
-            "colors": [
-                {
-                    "id": c.id,
-                    "color_name": c.color_name,
-                    "image": c.image.url if c.image else None
-                }
-                for c in product.colors.all()
-            ],
+            "sizes": fine_art_sizes,
+            "product_sizes": product_sizes,
+            "colors": colors,
 
             "gallery": [
                 img.image.url
@@ -1781,29 +2040,34 @@ def view_products(request):
 
             "frames": [
                 {
-                    "id": f.id,
-                    "name": f.name,
-                    "extra_price": convert_price(
-                    f.extra_price,
-                    currency
-                ) if f.extra_price is not None else None,
-                    "image": f.image.url if getattr(f, "image", None) else None
+                    "id": frame.id,
+                    "name": frame.name,
+                    "extra_price": (
+                        convert_price(frame.extra_price, currency)
+                        if frame.extra_price is not None else None
+                    ),
+                    "image": (
+                        frame.image.url
+                        if getattr(frame, "image", None) else None
+                    ),
                 }
-                for f in product.frames.all()
+                for frame in product.frames.all()
             ],
 
             "materials": [
                 {
-                    "id": m.id,
-                    "name": m.name,
-                    "description": m.description,
-                    "extra_price": convert_price(
-                        m.extra_price,
-                        currency
-                    ) if m.extra_price is not None else None
+                    "id": material.id,
+                    "name": material.name,
+                    "description": material.description,
+                    "extra_price": (
+                        convert_price(material.extra_price, currency)
+                        if material.extra_price is not None else None
+                    ),
                 }
-                for m in product.materials.all()
-            ]
+                for material in product.materials.all()
+            ],
+
+            "variants": variants,
         })
 
     return JsonResponse({
@@ -1814,44 +2078,129 @@ def view_products(request):
         "products": data
     }, status=200)
 
-from django.db.models import Q, Avg, Count
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_http_methods
 
-from ChronusUser.currency import convert_price
 @csrf_exempt
 @require_http_methods(["GET"])
 def view_single_product(request, product_id):
     try:
-        currency = request.GET.get(
-            "currency",
-            "AED"
-        ).upper()
+        currency = request.GET.get("currency", "AED").upper()
+
         product = Product.objects.select_related(
             "category", "subcategory", "brand"
         ).prefetch_related(
             "gallery",
             "sizes",
-            "colors",
+            "colors__gallery",
+            "colors__sizes",
+            "product_sizes__color",
             "frames",
             "materials",
             "variants__options",
             "variants__images"
-        ).get(id=product_id,
-              is_published=True)
+        ).get(
+            id=product_id,
+            is_published=True
+        )
 
-        reviews_qs = Review.objects.filter(product=product).order_by("-created_at")
+        reviews_qs = Review.objects.filter(
+            product=product
+        ).order_by("-created_at")
 
         rating_summary = reviews_qs.aggregate(
             avg_rating=Avg("rating"),
             total_reviews=Count("id")
         )
 
+        is_size_pricing = bool(product.has_size_pricing)
+        is_generic_variant = (
+            product.product_type == "variant" and not is_size_pricing
+        )
+
+        fine_art_sizes = [
+            {
+                "id": size.id,
+                "size": size.size,
+                "price": convert_price(size.price, currency),
+            }
+            for size in product.sizes.all()
+        ]
+
+        product_sizes = []
+        if is_size_pricing:
+            product_sizes = [
+                {
+                    "id": size.id,
+                    "color_id": size.color_id,
+                    "color_name": (
+                        size.color.color_name
+                        if size.color else None
+                    ),
+                    "size": size.size,
+                    "price": convert_price(size.price, currency),
+                    "stock": size.stock,
+                }
+                for size in product.product_sizes.all()
+            ]
+
+        colors = []
+        for color in product.colors.all():
+            color_sizes = []
+            if is_size_pricing:
+                color_sizes = [
+                    {
+                        "id": size.id,
+                        "size": size.size,
+                        "price": convert_price(size.price, currency),
+                        "stock": size.stock,
+                    }
+                    for size in color.sizes.all()
+                ]
+
+            colors.append({
+                "id": color.id,
+                "color_name": color.color_name,
+                "image": color.image.url if color.image else None,
+                "gallery": [
+                    {
+                        "id": image.id,
+                        "image": image.image.url if image.image else None,
+                        "order": image.order,
+                    }
+                    for image in color.gallery.all()
+                    if image.image
+                ],
+                "sizes": color_sizes,
+            })
+
+        variants = []
+        if is_generic_variant:
+            variants = [
+                {
+                    "id": variant.id,
+                    "sku": variant.sku,
+                    "stock": variant.stock,
+                    "is_active": variant.is_active,
+                    "options": [
+                        {
+                            "option_name": option.option_name,
+                            "option_value": option.option_value,
+                        }
+                        for option in variant.options.all()
+                    ],
+                    "images": [
+                        image.image.url
+                        for image in variant.images.all()
+                        if image.image
+                    ],
+                }
+                for variant in product.variants.filter(is_active=True)
+            ]
+
         data = {
             "id": product.id,
             "name": product.name,
             "product_type": product.product_type,
+            "has_size_pricing": is_size_pricing,
 
             "category": {
                 "id": product.category.id,
@@ -1868,20 +2217,16 @@ def view_single_product(request, product_id):
                 "name": product.brand.name
             } if product.brand else None,
 
-            # "price": str(product.price),
-            "price": convert_price(
-                product.price,
-                currency
-            ),
+            "price": convert_price(product.price, currency),
             "currency": currency,
             "description": product.description,
             "stock": product.stock,
             "image": product.image.url if product.image else None,
 
             "gallery": [
-                img.image.url
-                for img in product.gallery.all()
-                if img.image
+                image.image.url
+                for image in product.gallery.all()
+                if image.image
             ],
 
             "is_featured": product.is_featured,
@@ -1889,107 +2234,425 @@ def view_single_product(request, product_id):
             "created_at": product.created_at,
             "specification": product.specification,
 
-            "sizes": [
-                {
-                    "id": s.id,
-                    "size": s.size,
-                    "price": convert_price(
-                    s.price,
-                    currency
-                )
-                }
-                for s in product.sizes.all()
-            ],
-
-            "colors": [
-                {
-                    "id": c.id,
-                    "color_name": c.color_name,
-                    "image": c.image.url if c.image else None
-                }
-                for c in product.colors.all()
-            ],
+            "sizes": fine_art_sizes,
+            "product_sizes": product_sizes,
+            "colors": colors,
 
             "frames": [
                 {
-                    "id": f.id,
-                    "name": f.name,
-                    # "extra_price": str(f.extra_price) if f.extra_price is not None else None,
+                    "id": frame.id,
+                    "name": frame.name,
                     "extra_price": (
-                    convert_price(
-                        f.extra_price,
-                        currency
-                    )
-                    if f.extra_price is not None
-                    else None
-                ),
-                    "image": f.image.url if getattr(f, "image", None) else None
+                        convert_price(frame.extra_price, currency)
+                        if frame.extra_price is not None else None
+                    ),
+                    "image": (
+                        frame.image.url
+                        if getattr(frame, "image", None) else None
+                    ),
                 }
-                for f in product.frames.all()
+                for frame in product.frames.all()
             ],
 
             "materials": [
                 {
-                    "id": m.id,
-                    "name": m.name,
-                    "description": m.description,
-                    # "extra_price": str(m.extra_price) if m.extra_price is not None else None
+                    "id": material.id,
+                    "name": material.name,
+                    "description": material.description,
                     "extra_price": (
-                        convert_price(
-                            m.extra_price,
-                            currency
-                        )
-                        if m.extra_price is not None
-                        else None
-                    )
-                    
+                        convert_price(material.extra_price, currency)
+                        if material.extra_price is not None else None
+                    ),
                 }
-                for m in product.materials.all()
+                for material in product.materials.all()
             ],
 
-            "variants": [
-                {
-                    "id": variant.id,
-                    "sku": variant.sku,
-                    "stock": variant.stock,
-                    "is_active": variant.is_active,
-
-                    "options": [
-                        {
-                            "option_name": option.option_name,
-                            "option_value": option.option_value,
-                        }
-                        for option in variant.options.all()
-                    ],
-
-                    "images": [
-                        image.image.url
-                        for image in variant.images.all()
-                        if image.image
-                    ]
-                }
-                for variant in product.variants.filter(is_active=True)
-            ],
+            "variants": variants,
 
             "average_rating": round(rating_summary["avg_rating"] or 0, 1),
             "review_count": rating_summary["total_reviews"],
-
             "reviews": [
                 {
-                    "id": r.id,
-                    "name": r.name,
-                    "rating": r.rating,
-                    "comment": r.comment,
-                    "created_at": r.created_at,
+                    "id": review.id,
+                    "name": review.name,
+                    "rating": review.rating,
+                    "comment": review.comment,
+                    "created_at": review.created_at,
                 }
-                for r in reviews_qs
-            ]
+                for review in reviews_qs
+            ],
         }
 
         return JsonResponse(data, status=200)
 
     except Product.DoesNotExist:
         return JsonResponse({"error": "Product not found"}, status=404)
+
+
+
+# from django.db.models import Q, Avg, Count
+# from django.http import JsonResponse
+# from django.views.decorators.csrf import csrf_exempt
+# from django.views.decorators.http import require_http_methods
+# from ChronusUser.currency import convert_price, convert_to_aed
+# @csrf_exempt
+# @require_http_methods(["GET"])
+# def view_products(request):
+#     category = request.GET.get("category")
+#     subcategory = request.GET.get("subcategory")
+#     search = request.GET.get("search")
+#     min_price = request.GET.get("min_price")
+#     max_price = request.GET.get("max_price")
+
+#     currency = request.GET.get("currency", "AED").upper()   #newwww
+
+#     try:
+#         page = int(request.GET.get("page", 1))
+#         limit = int(request.GET.get("limit", 12))
+#     except ValueError:
+#         return JsonResponse({"error": "Invalid pagination values"}, status=400)
+
+#     if page < 1 or limit < 1:
+#         return JsonResponse({"error": "Page and limit must be greater than 0"}, status=400)
+
+#     offset = (page - 1) * limit
+
+#     products = Product.objects.filter(is_published=True).select_related(
+#         "category", "subcategory", "brand"
+#     ).prefetch_related(
+#         "sizes",
+#         "colors",
+#         "gallery",
+#         "frames",
+#         "materials"
+#     )
+
+#     # CATEGORY FILTER
+#     if category:
+#         if category.isdigit():
+#             products = products.filter(category__id=category)
+#         else:
+#             products = products.filter(category__name__icontains=category)
+
+#     # SUBCATEGORY FILTER
+#     if subcategory:
+#         if subcategory.isdigit():
+#             products = products.filter(subcategory__id=subcategory)
+#         else:
+#             products = products.filter(subcategory__name__icontains=subcategory)
+
+#     # SEARCH
+#     if search:
+#         products = products.filter(
+#             Q(name__icontains=search) |
+#             Q(brand__name__icontains=search) |
+#             Q(category__name__icontains=search) |
+#             Q(subcategory__name__icontains=search)
+#         )
+
+#     # PRICE FILTER
+#     # if min_price:
+#     #     products = products.filter(price__gte=min_price)
+
+#     # if max_price:
+#     #     products = products.filter(price__lte=max_price)
+
+
+#     # UPDATED PRICE FILTER BASED ON CURRENCY
+#     try:
+#         if min_price:
+#             min_price_aed =convert_to_aed(float(min_price),currency)
+#             products = products.filter(price__gte=min_price_aed)
+#         if max_price:
+#             max_price_aed = convert_to_aed(float(max_price),currency)
+#             products = products.filter(price__lte=max_price_aed)
+#     except ValueError:
+#         return JsonResponse(
+#             {"error": "Invalid price or currency"},
+#             status=400
+#         )
+
+
+
+#     total_products = products.count()
+#     total_pages = (total_products + limit - 1) // limit
+
+#     products = products[offset:offset + limit]
+
+#     data = []
+
+#     for product in products:
+#         data.append({
+#             "id": product.id,
+#             "name": product.name,
+
+#             "category": {
+#                 "id": product.category.id,
+#                 "name": product.category.name
+#             } if product.category else None,
+
+#             "subcategory": {
+#                 "id": product.subcategory.id,
+#                 "name": product.subcategory.name
+#             } if product.subcategory else None,
+
+#             "brand": {
+#                 "id": product.brand.id,
+#                 "name": product.brand.name
+#             } if product.brand else None,
+
+#             # "price": str(product.price),
+#             "price": convert_price(
+#                 product.price,
+#                 currency
+#             ),
+#             "currency": currency,
+#             "description": product.description,
+#             "stock": product.stock,
+#             "image": product.image.url if product.image else None,
+#             "created_at": product.created_at,
+#             "is_featured": product.is_featured,
+#             "is_best_seller": product.is_best_seller,
+#             "specification": product.specification,
+
+#             "sizes": [
+#                 {
+#                     "size": s.size,
+#                     # "price": str(s.price)
+#                     "price": convert_price(
+#                         s.price,
+#                         currency
+#                     )
+#                 }
+#                 for s in product.sizes.all()
+#             ],
+
+#             "colors": [
+#                 {
+#                     "id": c.id,
+#                     "color_name": c.color_name,
+#                     "image": c.image.url if c.image else None
+#                 }
+#                 for c in product.colors.all()
+#             ],
+
+#             "gallery": [
+#                 img.image.url
+#                 for img in product.gallery.all()
+#                 if img.image
+#             ],
+
+#             "frames": [
+#                 {
+#                     "id": f.id,
+#                     "name": f.name,
+#                     "extra_price": convert_price(
+#                     f.extra_price,
+#                     currency
+#                 ) if f.extra_price is not None else None,
+#                     "image": f.image.url if getattr(f, "image", None) else None
+#                 }
+#                 for f in product.frames.all()
+#             ],
+
+#             "materials": [
+#                 {
+#                     "id": m.id,
+#                     "name": m.name,
+#                     "description": m.description,
+#                     "extra_price": convert_price(
+#                         m.extra_price,
+#                         currency
+#                     ) if m.extra_price is not None else None
+#                 }
+#                 for m in product.materials.all()
+#             ]
+#         })
+
+#     return JsonResponse({
+#         "page": page,
+#         "limit": limit,
+#         "total_products": total_products,
+#         "total_pages": total_pages,
+#         "products": data
+#     }, status=200)
+
+# from django.db.models import Q, Avg, Count
+# from django.http import JsonResponse
+# from django.views.decorators.csrf import csrf_exempt
+# from django.views.decorators.http import require_http_methods
+
+# from ChronusUser.currency import convert_price
+# @csrf_exempt
+# @require_http_methods(["GET"])
+# def view_single_product(request, product_id):
+#     try:
+#         currency = request.GET.get(
+#             "currency",
+#             "AED"
+#         ).upper()
+#         product = Product.objects.select_related(
+#             "category", "subcategory", "brand"
+#         ).prefetch_related(
+#             "gallery",
+#             "sizes",
+#             "colors",
+#             "frames",
+#             "materials",
+#             "variants__options",
+#             "variants__images"
+#         ).get(id=product_id,
+#               is_published=True)
+
+#         reviews_qs = Review.objects.filter(product=product).order_by("-created_at")
+
+#         rating_summary = reviews_qs.aggregate(
+#             avg_rating=Avg("rating"),
+#             total_reviews=Count("id")
+#         )
+
+#         data = {
+#             "id": product.id,
+#             "name": product.name,
+#             "product_type": product.product_type,
+
+#             "category": {
+#                 "id": product.category.id,
+#                 "name": product.category.name
+#             } if product.category else None,
+
+#             "subcategory": {
+#                 "id": product.subcategory.id,
+#                 "name": product.subcategory.name
+#             } if product.subcategory else None,
+
+#             "brand": {
+#                 "id": product.brand.id,
+#                 "name": product.brand.name
+#             } if product.brand else None,
+
+#             # "price": str(product.price),
+#             "price": convert_price(
+#                 product.price,
+#                 currency
+#             ),
+#             "currency": currency,
+#             "description": product.description,
+#             "stock": product.stock,
+#             "image": product.image.url if product.image else None,
+
+#             "gallery": [
+#                 img.image.url
+#                 for img in product.gallery.all()
+#                 if img.image
+#             ],
+
+#             "is_featured": product.is_featured,
+#             "is_best_seller": product.is_best_seller,
+#             "created_at": product.created_at,
+#             "specification": product.specification,
+
+#             "sizes": [
+#                 {
+#                     "id": s.id,
+#                     "size": s.size,
+#                     "price": convert_price(
+#                     s.price,
+#                     currency
+#                 )
+#                 }
+#                 for s in product.sizes.all()
+#             ],
+
+#             "colors": [
+#                 {
+#                     "id": c.id,
+#                     "color_name": c.color_name,
+#                     "image": c.image.url if c.image else None
+#                 }
+#                 for c in product.colors.all()
+#             ],
+
+#             "frames": [
+#                 {
+#                     "id": f.id,
+#                     "name": f.name,
+#                     # "extra_price": str(f.extra_price) if f.extra_price is not None else None,
+#                     "extra_price": (
+#                     convert_price(
+#                         f.extra_price,
+#                         currency
+#                     )
+#                     if f.extra_price is not None
+#                     else None
+#                 ),
+#                     "image": f.image.url if getattr(f, "image", None) else None
+#                 }
+#                 for f in product.frames.all()
+#             ],
+
+#             "materials": [
+#                 {
+#                     "id": m.id,
+#                     "name": m.name,
+#                     "description": m.description,
+#                     # "extra_price": str(m.extra_price) if m.extra_price is not None else None
+#                     "extra_price": (
+#                         convert_price(
+#                             m.extra_price,
+#                             currency
+#                         )
+#                         if m.extra_price is not None
+#                         else None
+#                     )
+                    
+#                 }
+#                 for m in product.materials.all()
+#             ],
+
+#             "variants": [
+#                 {
+#                     "id": variant.id,
+#                     "sku": variant.sku,
+#                     "stock": variant.stock,
+#                     "is_active": variant.is_active,
+
+#                     "options": [
+#                         {
+#                             "option_name": option.option_name,
+#                             "option_value": option.option_value,
+#                         }
+#                         for option in variant.options.all()
+#                     ],
+
+#                     "images": [
+#                         image.image.url
+#                         for image in variant.images.all()
+#                         if image.image
+#                     ]
+#                 }
+#                 for variant in product.variants.filter(is_active=True)
+#             ],
+
+#             "average_rating": round(rating_summary["avg_rating"] or 0, 1),
+#             "review_count": rating_summary["total_reviews"],
+
+#             "reviews": [
+#                 {
+#                     "id": r.id,
+#                     "name": r.name,
+#                     "rating": r.rating,
+#                     "comment": r.comment,
+#                     "created_at": r.created_at,
+#                 }
+#                 for r in reviews_qs
+#             ]
+#         }
+
+#         return JsonResponse(data, status=200)
+
+#     except Product.DoesNotExist:
+#         return JsonResponse({"error": "Product not found"}, status=404)
 
 
 from django.views.decorators.http import require_http_methods
@@ -4975,8 +5638,15 @@ class TabbyWebhook(APIView):
                         pk=payment_attempt.pk
                     )
 
+                    if locked_order.payment_status == "paid":
+                        print(
+                            f"Ignoring Tabby rejection for already-paid order "
+                            f"{locked_order.id}",
+                            flush=True
+                        )
+
                     # Never downgrade a successful or authorized attempt.
-                    if locked_attempt.status in ["completed", "authorized"]:
+                    elif locked_attempt.status in ["completed", "authorized"]:
 
                         print(
                             f"Tabby terminal status ignored for "
@@ -5401,7 +6071,8 @@ def release_order_stock(order_id):
 
         order_items = order.items.select_related(
             "product",
-            "variant"
+            "variant",
+            "product_size"
         ).all()
 
         for item in order_items:
@@ -5411,26 +6082,61 @@ def release_order_stock(order_id):
                     f"Product missing for order item {item.id}"
                 )
 
-            if item.product.product_type == "variant":
+            # SIZE-PRICING PRODUCTS
+            if (
+                item.product.product_type == "variant"
+                and item.product.has_size_pricing
+            ):
+
+                if item.product_size is None:
+                    raise ValidationError(
+                        f"ProductSize missing for order item {item.id}"
+                    )
+
+                updated = ProductSize.objects.filter(
+                    id=item.product_size_id,
+                    product_id=item.product_id
+                ).update(
+                    stock=F("stock") + item.quantity
+                )
+
+                if not updated:
+                    raise ValidationError(
+                        f"ProductSize not found for order item {item.id}"
+                    )
+
+            # GENERIC SKU VARIANT PRODUCTS
+            elif item.product.product_type == "variant":
 
                 if item.variant is None:
                     raise ValidationError(
                         f"Variant missing for order item {item.id}"
                     )
 
-                ProductVariant.objects.filter(
+                updated = ProductVariant.objects.filter(
                     id=item.variant_id
                 ).update(
                     stock=F("stock") + item.quantity
                 )
 
+                if not updated:
+                    raise ValidationError(
+                        f"Variant not found for order item {item.id}"
+                    )
+
+            # FINE ART / REGULAR PRODUCTS
             else:
 
-                Product.objects.filter(
+                updated = Product.objects.filter(
                     id=item.product_id
                 ).update(
                     stock=F("stock") + item.quantity
                 )
+
+                if not updated:
+                    raise ValidationError(
+                        f"Product not found for order item {item.id}"
+                    )
 
         order.payment_status = "failed"
         order.stock_restored = True

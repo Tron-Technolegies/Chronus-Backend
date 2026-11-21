@@ -20,8 +20,18 @@ from .permissions import (
     SuperAdminPermission,
     admin_access,
 )
-
-# Create your views here.
+from ChronasAdmin.models import (
+    Category,
+    Brand,
+    FineArtSize,
+    Product,
+    Order,
+    Coupon,
+    ProductImage,
+    ProductColor,
+    ProductColorImage,
+    SubCategory,
+)
 
 
 @require_http_methods(["GET"])
@@ -305,56 +315,79 @@ from rest_framework.decorators import (
 )
 
 
-from decimal import Decimal, InvalidOperation
+
+
 @api_view(["POST"])
 @permission_classes([StoreManagerOrSuperAdmin])
 @transaction.atomic
 def add_products(request):
     try:
-        supplier_id = request.POST.get("supplier")
-        name = request.POST.get("name")
-        category_id = request.POST.get("category")
-        brand_id = request.POST.get("brand")
-        price = request.POST.get("price")
-        description = request.POST.get("description")
-        stock = request.POST.get("stock")
-        image = request.FILES.get("image")
+        data = request.POST
 
-        specification = request.POST.get("specification")
-        frame_ids = request.POST.get("frame_ids")
-        material_ids = request.POST.get("material_ids")
-        supplier_cost = request.POST.get("supplier_cost")
-        is_published = request.POST.get("is_published","true") in ["true", "True", "1"]
-        # material_ids = request.data.get("material_ids", [])
-        supplier = None
+        # --------------------------------------------------
+        # BASIC PRODUCT FIELDS
+        # --------------------------------------------------
 
-        weight = request.POST.get("weight", 0.50)
-        length = request.POST.get("length", 10.00)
-        width = request.POST.get("width", 10.00)
-        height = request.POST.get("height", 10.00)
+        name = data.get("name", "").strip()
+        product_type = data.get("product_type")
 
-
-     
-        product_type = request.POST.get("product_type")
         has_size_pricing = (
-            request.POST.get("has_size_pricing", "false").lower()
+            data.get("has_size_pricing", "false").lower()
             in ["true", "1"]
         )
-        if has_size_pricing and product_type != "variant":
+
+        if not name:
             return JsonResponse(
-                {"error": "Size pricing is only supported for variant products."},
+                {"error": "Product name is required"},
                 status=400
             )
+
         if product_type not in ["fine_art", "variant"]:
             return JsonResponse(
                 {"error": "Invalid product type"},
                 status=400
             )
 
-        if product_type == "fine_art":
-            stock = int(stock) if stock else 0
-        else:
-            stock = 0
+        if has_size_pricing and product_type != "variant":
+            return JsonResponse(
+                {"error": "Size pricing is only supported for variant products."},
+                status=400
+            )
+
+        # --------------------------------------------------
+        # VALIDATE PRODUCT PRICE AND SUPPLIER COST
+        # --------------------------------------------------
+
+        try:
+            price = Decimal(str(data.get("price")))
+
+            supplier_cost_value = data.get("supplier_cost")
+
+            supplier_cost = (
+                Decimal(str(supplier_cost_value))
+                if supplier_cost_value not in [None, ""]
+                else None
+            )
+
+            if not price.is_finite() or price <= 0:
+                raise InvalidOperation
+
+            if supplier_cost is not None:
+                if not supplier_cost.is_finite() or supplier_cost < 0:
+                    raise InvalidOperation
+
+        except (InvalidOperation, TypeError, ValueError):
+            return JsonResponse(
+                {"error": "Invalid product price or supplier cost."},
+                status=400
+            )
+
+        # --------------------------------------------------
+        # RELATED OBJECTS
+        # --------------------------------------------------
+
+        supplier = None
+        supplier_id = data.get("supplier")
 
         if supplier_id:
             supplier = Supplier.objects.filter(id=supplier_id).first()
@@ -364,59 +397,473 @@ def add_products(request):
                     {"error": "Invalid supplier"},
                     status=400
                 )
-        if frame_ids:
-            try:
-                frame_ids = json.loads(frame_ids)
-            except json.JSONDecodeError:
-                return JsonResponse({"error": "Invalid frame_ids format"}, status=400)
-        else:
-            frame_ids = []
-
-        if material_ids:
-            try:
-                material_ids = json.loads(material_ids)
-            except json.JSONDecodeError:
-                return JsonResponse({"error": "Invalid material_ids format"}, status=400)
-        else:
-            material_ids = []
-
-        # Convert specification JSON string → dictionary
-        if specification:
-            try:
-                specification = json.loads(specification)
-            except json.JSONDecodeError:
-                return JsonResponse({"error": "Invalid specification format"}, status=400)
-        else:
-            specification = {}
-
-        if not name:
-            return JsonResponse({"error": "Product name is required"}, status=400)
-
-        if not price:
-            return JsonResponse({"error": "Price is required"}, status=400)
-        
-
 
         category = None
+        category_id = data.get("category")
+
         if category_id:
             category = Category.objects.filter(id=category_id).first()
-            if not category:
-                return JsonResponse({"error": "Invalid category"}, status=400)
 
-        subcategory_id = request.POST.get("subcategory")
+            if not category:
+                return JsonResponse(
+                    {"error": "Invalid category"},
+                    status=400
+                )
 
         subcategory = None
+        subcategory_id = data.get("subcategory")
+
         if subcategory_id:
-            subcategory = SubCategory.objects.filter(id=subcategory_id).first()
+            subcategory = SubCategory.objects.filter(
+                id=subcategory_id
+            ).first()
+
+            if not subcategory:
+                return JsonResponse(
+                    {"error": "Invalid subcategory"},
+                    status=400
+                )
 
         brand = None
+        brand_id = data.get("brand")
+
         if brand_id:
             brand = Brand.objects.filter(id=brand_id).first()
-            if not brand:
-                return JsonResponse({"error": "Invalid brand"}, status=400)
 
-        is_featured = request.POST.get("is_featured") in ["true", "True", "1"]
-        is_best_seller = request.POST.get("is_best_seller") in ["true", "True", "1"]
+            if not brand:
+                return JsonResponse(
+                    {"error": "Invalid brand"},
+                    status=400
+                )
+
+        # --------------------------------------------------
+        # PARSE JSON FIELDS
+        # --------------------------------------------------
+
+        def parse_json_field(field_name, default):
+            raw_value = data.get(field_name)
+
+            if not raw_value:
+                return default
+
+            try:
+                return json.loads(raw_value)
+            except (json.JSONDecodeError, TypeError):
+                raise ValueError(
+                    f"Invalid {field_name} format."
+                )
+
+        try:
+            specification = parse_json_field("specification", {})
+            frame_ids = parse_json_field("frame_ids", [])
+            material_ids = parse_json_field("material_ids", [])
+            sizes = parse_json_field("sizes", [])
+            colors = parse_json_field("colors", [])
+            variants = parse_json_field("variants", [])
+
+        except ValueError as exc:
+            return JsonResponse(
+                {"error": str(exc)},
+                status=400
+            )
+
+        if not isinstance(specification, dict):
+            return JsonResponse(
+                {"error": "Specification must be an object."},
+                status=400
+            )
+
+        if (
+            not isinstance(frame_ids, list)
+            or not isinstance(material_ids, list)
+            or not isinstance(sizes, list)
+            or not isinstance(colors, list)
+            or not isinstance(variants, list)
+        ):
+            return JsonResponse(
+                {"error": "Invalid product data format."},
+                status=400
+            )
+
+        # --------------------------------------------------
+        # VALIDATE FRAME AND MATERIAL IDS
+        # --------------------------------------------------
+
+        try:
+            frame_ids = [int(value) for value in frame_ids]
+            material_ids = [int(value) for value in material_ids]
+
+            if len(frame_ids) != len(set(frame_ids)):
+                raise ValueError
+
+            if len(material_ids) != len(set(material_ids)):
+                raise ValueError
+
+        except (TypeError, ValueError):
+            return JsonResponse(
+                {"error": "Invalid frame or material IDs."},
+                status=400
+            )
+
+        if frame_ids:
+            valid_frame_ids = set(
+                Frame.objects.filter(
+                    id__in=frame_ids
+                ).values_list("id", flat=True)
+            )
+
+            if valid_frame_ids != set(frame_ids):
+                return JsonResponse(
+                    {"error": "One or more frame IDs are invalid."},
+                    status=400
+                )
+
+        if material_ids:
+            valid_material_ids = set(
+                Material.objects.filter(
+                    id__in=material_ids
+                ).values_list("id", flat=True)
+            )
+
+            if valid_material_ids != set(material_ids):
+                return JsonResponse(
+                    {"error": "One or more material IDs are invalid."},
+                    status=400
+                )
+
+        # --------------------------------------------------
+        # HELPER: VALIDATE SIZE ENTRY
+        # --------------------------------------------------
+
+        def validate_size_entry(item, color_name=None):
+            if not isinstance(item, dict):
+                return "Invalid size entry."
+
+            size_name = str(item.get("size", "")).strip()
+
+            if not size_name:
+                return "Size name is required."
+
+            try:
+                size_price = Decimal(str(item.get("price")))
+                size_stock = int(item.get("stock", 0))
+
+                cost_value = item.get("supplier_cost")
+
+                size_supplier_cost = (
+                    Decimal(str(cost_value))
+                    if cost_value not in [None, ""]
+                    else None
+                )
+
+                if not size_price.is_finite() or size_price <= 0:
+                    raise InvalidOperation
+
+                if size_stock < 0:
+                    raise ValueError
+
+                if size_supplier_cost is not None:
+                    if (
+                        not size_supplier_cost.is_finite()
+                        or size_supplier_cost < 0
+                    ):
+                        raise InvalidOperation
+
+            except (InvalidOperation, TypeError, ValueError):
+                return f"Invalid price, stock or supplier cost for size {size_name}."
+
+            return None
+
+        # --------------------------------------------------
+        # VALIDATE FINE ART PRODUCTS
+        # --------------------------------------------------
+
+        if product_type == "fine_art":
+
+            seen_sizes = set()
+
+            for item in sizes:
+                if not isinstance(item, dict):
+                    return JsonResponse(
+                        {"error": "Invalid Fine Art size entry."},
+                        status=400
+                    )
+
+                size_name = str(item.get("size", "")).strip()
+
+                if not size_name:
+                    return JsonResponse(
+                        {"error": "Each Fine Art size must have a size name."},
+                        status=400
+                    )
+
+                if size_name.casefold() in seen_sizes:
+                    return JsonResponse(
+                        {"error": f"Duplicate Fine Art size: {size_name}"},
+                        status=400
+                    )
+
+                seen_sizes.add(size_name.casefold())
+
+                try:
+                    size_price = Decimal(str(item.get("price")))
+
+                    if not size_price.is_finite() or size_price <= 0:
+                        raise InvalidOperation
+
+                except (InvalidOperation, TypeError, ValueError):
+                    return JsonResponse(
+                        {"error": "Invalid Fine Art size price."},
+                        status=400
+                    )
+
+            seen_colors = set()
+
+            for color in colors:
+                if not isinstance(color, dict):
+                    return JsonResponse(
+                        {"error": "Invalid Fine Art color entry."},
+                        status=400
+                    )
+
+                color_name = str(
+                    color.get("color_name", "")
+                ).strip()
+
+                if not color_name:
+                    return JsonResponse(
+                        {"error": "Each color must have a color name."},
+                        status=400
+                    )
+
+                if color_name.casefold() in seen_colors:
+                    return JsonResponse(
+                        {"error": f"Duplicate color: {color_name}"},
+                        status=400
+                    )
+
+                seen_colors.add(color_name.casefold())
+
+        # --------------------------------------------------
+        # VALIDATE SIZE-PRICED PRODUCTS
+        # Supports:
+        # 1. Size only
+        # 2. Colour -> sizes
+        # --------------------------------------------------
+
+        if has_size_pricing:
+
+            if colors:
+
+                seen_colors = set()
+
+                for color in colors:
+
+                    if not isinstance(color, dict):
+                        return JsonResponse(
+                            {"error": "Invalid color entry."},
+                            status=400
+                        )
+
+                    color_name = str(
+                        color.get("color_name", "")
+                    ).strip()
+
+                    if not color_name:
+                        return JsonResponse(
+                            {"error": "Each color must have a color name."},
+                            status=400
+                        )
+
+                    if color_name.casefold() in seen_colors:
+                        return JsonResponse(
+                            {"error": f"Duplicate color: {color_name}"},
+                            status=400
+                        )
+
+                    seen_colors.add(color_name.casefold())
+
+                    color_sizes = color.get("sizes", [])
+
+                    if not isinstance(color_sizes, list) or not color_sizes:
+                        return JsonResponse(
+                            {
+                                "error": f"Sizes are required for color {color_name}."
+                            },
+                            status=400
+                        )
+
+                    seen_sizes = set()
+
+                    for item in color_sizes:
+
+                        error = validate_size_entry(
+                            item,
+                            color_name
+                        )
+
+                        if error:
+                            return JsonResponse(
+                                {"error": error},
+                                status=400
+                            )
+
+                        size_name = str(item["size"]).strip()
+
+                        if size_name.casefold() in seen_sizes:
+                            return JsonResponse(
+                                {
+                                    "error": (
+                                        f"Duplicate size {size_name} "
+                                        f"for color {color_name}."
+                                    )
+                                },
+                                status=400
+                            )
+
+                        seen_sizes.add(size_name.casefold())
+
+            else:
+
+                if not sizes:
+                    return JsonResponse(
+                        {"error": "Sizes are required for this product."},
+                        status=400
+                    )
+
+                seen_sizes = set()
+
+                for item in sizes:
+
+                    error = validate_size_entry(item)
+
+                    if error:
+                        return JsonResponse(
+                            {"error": error},
+                            status=400
+                        )
+
+                    size_name = str(item["size"]).strip()
+
+                    if size_name.casefold() in seen_sizes:
+                        return JsonResponse(
+                            {"error": f"Duplicate size: {size_name}"},
+                            status=400
+                        )
+
+                    seen_sizes.add(size_name.casefold())
+
+        # --------------------------------------------------
+        # VALIDATE GENERIC VARIANTS
+        # --------------------------------------------------
+
+        if product_type == "variant" and not has_size_pricing:
+
+            if not variants:
+                return JsonResponse(
+                    {"error": "Variants are required."},
+                    status=400
+                )
+
+            seen_skus = set()
+
+            for variant in variants:
+
+                if not isinstance(variant, dict):
+                    return JsonResponse(
+                        {"error": "Invalid variant entry."},
+                        status=400
+                    )
+
+                sku = str(variant.get("sku", "")).strip()
+
+                if not sku:
+                    return JsonResponse(
+                        {"error": "Each variant must have a SKU."},
+                        status=400
+                    )
+
+                if (
+                    sku in seen_skus
+                    or ProductVariant.objects.filter(sku=sku).exists()
+                ):
+                    return JsonResponse(
+                        {"error": f"SKU '{sku}' already exists."},
+                        status=400
+                    )
+
+                seen_skus.add(sku)
+
+                try:
+                    variant_stock = int(variant.get("stock", 0))
+
+                    if variant_stock < 0:
+                        raise ValueError
+
+                except (TypeError, ValueError):
+                    return JsonResponse(
+                        {"error": f"Invalid stock for SKU {sku}."},
+                        status=400
+                    )
+
+                options = variant.get("options", [])
+
+                if not isinstance(options, list):
+                    return JsonResponse(
+                        {"error": f"Options for SKU {sku} must be a list."},
+                        status=400
+                    )
+
+                for option in options:
+
+                    if not isinstance(option, dict):
+                        return JsonResponse(
+                            {"error": f"Invalid option for SKU {sku}."},
+                            status=400
+                        )
+
+                    option_name = str(
+                        option.get("option_name", "")
+                    ).strip()
+
+                    option_value = str(
+                        option.get("option_value", "")
+                    ).strip()
+
+                    if not option_name or not option_value:
+                        return JsonResponse(
+                            {
+                                "error": (
+                                    f"Each option for SKU {sku} "
+                                    "must have option_name and option_value."
+                                )
+                            },
+                            status=400
+                        )
+
+        # --------------------------------------------------
+        # VALIDATE PRODUCT STOCK
+        # --------------------------------------------------
+
+        product_stock = 0
+
+        if product_type == "fine_art":
+
+            try:
+                product_stock = int(data.get("stock", 0))
+
+                if product_stock < 0:
+                    raise ValueError
+
+            except (TypeError, ValueError):
+                return JsonResponse(
+                    {"error": "Invalid product stock."},
+                    status=400
+                )
+
+        # --------------------------------------------------
+        # CREATE PRODUCT
+        # --------------------------------------------------
 
         product = Product.objects.create(
             supplier=supplier,
@@ -427,102 +874,71 @@ def add_products(request):
             subcategory=subcategory,
             brand=brand,
             price=price,
-            description=description,
-            stock=stock,
-            image=image,
-            is_featured=is_featured,
-            is_best_seller=is_best_seller,
+            description=data.get("description", ""),
+            stock=product_stock,
+            image=request.FILES.get("image"),
+            is_featured=data.get("is_featured") in ["true", "True", "1"],
+            is_best_seller=data.get("is_best_seller") in ["true", "True", "1"],
             specification=specification,
-            is_published=is_published,
+            is_published=data.get(
+                "is_published", "true"
+            ).lower() in ["true", "1"],
             supplier_cost=supplier_cost,
-
-            weight=weight,
-            length=length,
-            width=width,
-            height=height,
-
+            weight=data.get("weight", 0.50),
+            length=data.get("length", 10.00),
+            width=data.get("width", 10.00),
+            height=data.get("height", 10.00),
         )
-        if product.product_type == "fine_art":
-            if frame_ids:
-                product.frames.set(frame_ids)
 
-            if material_ids:
-                product.materials.set(material_ids)
+        # --------------------------------------------------
+        # FINE ART PRODUCT
+        # --------------------------------------------------
 
-            # ------------------------
-            # ADD SIZES
-            # ------------------------
-            sizes = request.POST.get("sizes")
+        if product_type == "fine_art":
 
-            if sizes:
-                try:
-                    sizes = json.loads(sizes)
+            product.frames.set(frame_ids)
+            product.materials.set(material_ids)
 
-                    for item in sizes:
-                        FineArtSize.objects.create(
-                            product=product,
-                            size=item.get("size"),
-                            price=item.get("price")
-                        )
+            for item in sizes:
+                FineArtSize.objects.create(
+                    product=product,
+                    size=item["size"].strip(),
+                    price=Decimal(str(item["price"]))
+                )
 
-                except json.JSONDecodeError:
-                    return JsonResponse({"error": "Invalid sizes format"}, status=400)
+            for index, color in enumerate(colors):
 
-            # ------------------------
-            # ADD COLORS
-            # ------------------------
-            colors = request.POST.get("colors")
+                ProductColor.objects.create(
+                    product=product,
+                    color_name=color["color_name"].strip(),
+                    image=request.FILES.get(f"color_image_{index}")
+                )
 
-            if colors:
-                try:
-                    colors = json.loads(colors)
-
-                    for index, color in enumerate(colors):
-                        color_image = request.FILES.get(f"color_image_{index}")
-
-                        ProductColor.objects.create(
-                            product=product,
-                            color_name=color.get("color_name"),
-                            image=color_image
-                        )
-
-                except json.JSONDecodeError:
-                    return JsonResponse({"error": "Invalid colors format"}, status=400)
-
-            # ------------------------
-            # ADD GALLERY IMAGES
-            # ------------------------
-            gallery_images = request.FILES.getlist("images")
-
-            for img in gallery_images:
+            for img in request.FILES.getlist("images"):
                 ProductImage.objects.create(
                     product=product,
                     image=img
                 )
 
-            # ------------------------
-            # FETCH COLORS FOR RESPONSE
-            # ------------------------
-            colors = ProductColor.objects.filter(product=product)
-
             color_data = [
                 {
-                    "color_name": c.color_name,
-                    "image": c.image.url if c.image else None
+                    "id": color.id,
+                    "color_name": color.color_name,
+                    "image": color.image.url if color.image else None
                 }
-                for c in colors
+                for color in product.colors.all()
             ]
 
             return JsonResponse({
                 "id": product.id,
                 "name": product.name,
-                "category": product.category.id if product.category else None,
-                "brand": product.brand.id if product.brand else None,
+                "category": product.category_id,
+                "brand": product.brand_id,
                 "price": str(product.price),
                 "supplier": {
-                        "id": product.supplier.id,
-                        "name": product.supplier.name
-                    } if product.supplier else None,
+                    "id": supplier.id,
+                    "name": supplier.name
+                } if supplier else None,
                 "subcategory": {
                     "id": product.subcategory.id,
                     "name": product.subcategory.name
@@ -533,455 +949,440 @@ def add_products(request):
                 "specification": product.specification,
                 "colors": color_data,
                 "created_at": product.created_at,
-
                 "weight": str(product.weight),
                 "length": str(product.length),
                 "width": str(product.width),
                 "height": str(product.height),
-
-               
             }, status=201)
-        
-        elif product.has_size_pricing:
 
-            sizes = request.POST.get("sizes")
+        # --------------------------------------------------
+        # SIZE-PRICED PRODUCT
+        # --------------------------------------------------
 
-            if not sizes:
-                return JsonResponse(
-                    {"error": "Sizes are required for this product."},
-                    status=400
-                )
+        if has_size_pricing:
 
-            try:
-                sizes = json.loads(sizes)
+            # ----------------------------------------------
+            # COLOUR + SIZE PRODUCT
+            # ----------------------------------------------
 
-                for item in sizes:
-                    size_name = item.get("size")
-                    size_price = item.get("price")
-                    try: 
+            if colors:
 
-                        size_stock = int(item.get("stock", 0))
-                        size_price = Decimal(str(size_price))
-                    except (TypeError, ValueError, InvalidOperation):
-                        return JsonResponse(
-                            {"error": "Invalid size price or stock."},
-                            status=400
-                        )
-                    if (
-                        not size_name
-                        or not str(size_name).strip()
-                        or size_price <= 0
-                        or size_stock < 0
-                    ):
-                        return JsonResponse(
-                            {"error": "Invalid size details."},
-                            status=400
-                        )
+                for color_index, color_data in enumerate(colors):
 
-
-                    ProductSize.objects.create(
-                        product=product,
-                        size=size_name,
-                        price=size_price,
-                        stock=size_stock
+                    primary_image = request.FILES.get(
+                        f"color_image_{color_index}"
                     )
 
-            except (json.JSONDecodeError, TypeError, ValueError):
-                return JsonResponse(
-                    {"error": "Invalid sizes format."},
-                    status=400
+                    color = ProductColor.objects.create(
+                        product=product,
+                        color_name=color_data["color_name"].strip(),
+                        image=primary_image
+                    )
+
+                    # Separate gallery for each colour
+
+                    gallery_images = request.FILES.getlist(
+                        f"color_images_{color_index}"
+                    )
+
+                    for image_order, img in enumerate(gallery_images):
+
+                        ProductColorImage.objects.create(
+                            color=color,
+                            image=img,
+                            order=image_order
+                        )
+
+                    # Create sizes belonging to this colour
+
+                    for item in color_data["sizes"]:
+
+                        size_cost = item.get("supplier_cost")
+
+                        ProductSize.objects.create(
+                            product=product,
+                            color=color,
+                            size=item["size"].strip(),
+                            price=Decimal(str(item["price"])),
+                            stock=int(item.get("stock", 0)),
+                            supplier_cost=(
+                                Decimal(str(size_cost))
+                                if size_cost not in [None, ""]
+                                else None
+                            )
+                        )
+
+                return JsonResponse({
+                    "message": "Colour and size product created successfully.",
+                    "product_id": product.id,
+                    "has_size_pricing": True,
+                    "colors": [
+                        {
+                            "id": color.id,
+                            "color_name": color.color_name,
+                            "image": (
+                                color.image.url if color.image else None
+                            ),
+                            "images": [
+                                image.image.url
+                                for image in color.gallery.all()
+                                if image.image
+                            ],
+                            "sizes": [
+                                {
+                                    "id": size.id,
+                                    "size": size.size,
+                                    "price": str(size.price),
+                                    "stock": size.stock,
+                                    "supplier_cost": (
+                                        str(size.supplier_cost)
+                                        if size.supplier_cost is not None
+                                        else None
+                                    )
+                                }
+                                for size in color.sizes.all()
+                            ]
+                        }
+                        for color in product.colors.prefetch_related(
+                            "gallery", "sizes"
+                        )
+                    ]
+                }, status=201)
+
+            # ----------------------------------------------
+            # SIZE-ONLY PRODUCT
+            # ----------------------------------------------
+
+            for item in sizes:
+
+                size_cost = item.get("supplier_cost")
+
+                ProductSize.objects.create(
+                    product=product,
+                    color=None,
+                    size=item["size"].strip(),
+                    price=Decimal(str(item["price"])),
+                    stock=int(item.get("stock", 0)),
+                    supplier_cost=(
+                        Decimal(str(size_cost))
+                        if size_cost not in [None, ""]
+                        else None
+                    )
                 )
 
             return JsonResponse({
                 "message": "Size-priced product created successfully.",
                 "product_id": product.id,
+                "has_size_pricing": True,
                 "sizes": [
                     {
-                        "id": s.id,
-                        "size": s.size,
-                        "price": str(s.price),
-                        "stock": s.stock
+                        "id": size.id,
+                        "size": size.size,
+                        "price": str(size.price),
+                        "stock": size.stock,
+                        "supplier_cost": (
+                            str(size.supplier_cost)
+                            if size.supplier_cost is not None
+                            else None
+                        )
                     }
-                    for s in product.product_sizes.all()
+                    for size in product.product_sizes.all()
                 ]
             }, status=201)
-        else:
-            variants = request.POST.get("variants")
 
-            if not variants:
-                return JsonResponse(
-                    {"error": "Variants are required."},
-                    status=400
-                )
+        # --------------------------------------------------
+        # GENERIC PRODUCT VARIANTS
+        # --------------------------------------------------
 
-            try:
-                variants = json.loads(variants)
-            except json.JSONDecodeError:
-                return JsonResponse(
-                    {"error": "Invalid variants format."},
-                    status=400
-                )
-            # variant_response = []
+        for index, variant_data in enumerate(variants):
 
-            for index, variant in enumerate(variants):
-
-                sku = variant.get("sku")
-                try:
-                    stock = int(variant.get("stock", 0))
-                except (TypeError, ValueError):
-                    return JsonResponse(
-                        {"error": "Invalid variant stock."},
-                        status=400
-                    )
-                options = variant.get("options", [])
-
-                if not sku:
-                    return JsonResponse(
-                        {"error": "Each variant must have a SKU."},
-                        status=400
-                    )
-
-                if ProductVariant.objects.filter(sku=sku).exists():
-                    return JsonResponse(
-                        {"error": f"SKU '{sku}' already exists."},
-                        status=400
-                    )
-
-                created_variant = ProductVariant.objects.create(
-                    product=product,
-                    sku=sku,
-                    stock=stock
-                )
-
-                # ------------------------
-                # SAVE OPTIONS
-                # ------------------------
-                for option in options:
-                    ProductVariantOption.objects.create(
-                        variant=created_variant,
-                        option_name=option.get("option_name"),
-                        option_value=option.get("option_value")
-                    )
-
-                    # ------------------------
-                    # SAVE VARIANT IMAGES
-                    # ------------------------
-                variant_images = request.FILES.getlist(
-                    f"variant_images_{index}"
-                )
-
-                for order, img in enumerate(variant_images):
-                    ProductVariantImage.objects.create(
-                        variant=created_variant,
-                        image=img,
-                        order=order
-                    )
-            variant_data = []
-
-            for variant in product.variants.prefetch_related(
-                "options",
-                "images"
-            ):
-                variant_data.append({
-                    "id": variant.id,
-                    "sku": variant.sku,
-                    "stock": variant.stock,
-                    "options": [
-                        {
-                            "option_name": option.option_name,
-                            "option_value": option.option_value,
-                        }
-                        for option in variant.options.all()
-                    ],
-                    "images": [
-                        image.image.url
-                        for image in variant.images.all()
-                    ]
-                })
-
-            return JsonResponse(
-                {
-                    "message": "Variant product created successfully.",
-                    "product_id": product.id,
-                    "total_variants": len(variant_data),
-                    "variants": variant_data
-                },
-                status=201
+            created_variant = ProductVariant.objects.create(
+                product=product,
+                sku=variant_data["sku"].strip(),
+                stock=int(variant_data.get("stock", 0))
             )
-    except Exception as e:
+
+            for option in variant_data.get("options", []):
+
+                ProductVariantOption.objects.create(
+                    variant=created_variant,
+                    option_name=option["option_name"].strip(),
+                    option_value=option["option_value"].strip()
+                )
+
+            variant_images = request.FILES.getlist(
+                f"variant_images_{index}"
+            )
+
+            for image_order, img in enumerate(variant_images):
+
+                ProductVariantImage.objects.create(
+                    variant=created_variant,
+                    image=img,
+                    order=image_order
+                )
+
+        # --------------------------------------------------
+        # GENERIC VARIANT RESPONSE
+        # --------------------------------------------------
+
+        variant_response = []
+
+        for variant in product.variants.prefetch_related(
+            "options", "images"
+        ):
+
+            variant_response.append({
+                "id": variant.id,
+                "sku": variant.sku,
+                "stock": variant.stock,
+                "is_active": variant.is_active,
+                "options": [
+                    {
+                        "option_name": option.option_name,
+                        "option_value": option.option_value
+                    }
+                    for option in variant.options.all()
+                ],
+                "images": [
+                    image.image.url
+                    for image in variant.images.all()
+                    if image.image
+                ]
+            })
+
+        return JsonResponse({
+            "message": "Variant product created successfully.",
+            "product_id": product.id,
+            "total_variants": len(variant_response),
+            "variants": variant_response
+        }, status=201)
+
+    except Exception as exc:
+
+        # Important: roll back the entire transaction if any
+        # database or file operation fails after product creation.
+
         transaction.set_rollback(True)
 
         return JsonResponse({
             "error": "Something went wrong",
-            "details": str(e)
+            "details": str(exc)
         }, status=500)
 
-    # except Exception as e:
-    #     return JsonResponse({
-    #         "error": "Something went wrong",
-    #         "details": str(e)
-    #     }, status=500)
-    
 
 
+# Replace the existing view_products() and view_single_product() functions
+# with the complete functions below. Keep your existing imports/decorators.
+
+from django.db.models import Q
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from ChronasAdmin.models import ProductColor
-from django.http import JsonResponse
-from django.db.models import Q
+
 
 @csrf_exempt
 @require_http_methods(["GET"])
 @admin_access(StoreManagerOrSuperAdmin)
 def view_products(request):
-
     category = request.GET.get("category")
     subcategory = request.GET.get("subcategory")
     search = request.GET.get("search")
     min_price = request.GET.get("min_price")
     max_price = request.GET.get("max_price")
-    
     low_stock = request.GET.get("low_stock")
+
     try:
-        stock_threshold = int(
-            request.GET.get("stock_threshold", 10)
-        )
-    except ValueError:
-        return JsonResponse(
-            {"error": "Invalid stock_threshold"},
-            status=400
-    )
+        stock_threshold = int(request.GET.get("stock_threshold", 10))
+        if stock_threshold < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "Invalid stock_threshold"}, status=400)
 
     try:
         page = int(request.GET.get("page", 1))
         limit = int(request.GET.get("limit", 12))
-    except ValueError:
+        if page < 1 or limit < 1:
+            raise ValueError
+    except (TypeError, ValueError):
         return JsonResponse({"error": "Invalid pagination values"}, status=400)
 
     offset = (page - 1) * limit
 
     products = Product.objects.select_related(
-            "category",
-            "subcategory",
-            "brand",
-            "supplier"
-        ).prefetch_related(
-            "sizes",
-            "colors",
-            "gallery",
-            "frames",
-            "materials",
-            "variants__options",
-            "variants__images",
-        )
+        "category", "subcategory", "brand", "supplier"
+    ).prefetch_related(
+        "sizes",                       # Existing FineArtSize relation
+        "colors__gallery",             # ProductColor and its images
+        "product_sizes__color",        # Size-pricing rows
+        "gallery",
+        "frames",
+        "materials",
+        "variants__options",
+        "variants__images",
+    )
 
-    # CATEGORY FILTER
     if category:
         if category.isdigit():
             products = products.filter(category__id=category)
         else:
             products = products.filter(category__name__icontains=category)
 
-    # SUBCATEGORY FILTER
     if subcategory:
         if subcategory.isdigit():
             products = products.filter(subcategory__id=subcategory)
         else:
             products = products.filter(subcategory__name__icontains=subcategory)
 
-    # SEARCH
     if search:
         products = products.filter(
-            Q(name__icontains=search) |
-            Q(brand__name__icontains=search) |
-            Q(category__name__icontains=search) |
-            Q(subcategory__name__icontains=search)
+            Q(name__icontains=search)
+            | Q(brand__name__icontains=search)
+            | Q(category__name__icontains=search)
+            | Q(subcategory__name__icontains=search)
         )
 
-    # LOW STOCK FILTER    
     if low_stock and low_stock.lower() == "true":
         products = products.filter(
-            Q(
-                product_type="fine_art",
-                stock__lte=stock_threshold
-            ) |
-            Q(
-                product_type="variant",
-                variants__stock__lte=stock_threshold
-            )
+            Q(product_type="fine_art", stock__lte=stock_threshold)
+            | Q(product_type="variant", has_size_pricing=True,
+                product_sizes__stock__lte=stock_threshold)
+            | Q(product_type="variant", has_size_pricing=False,
+                variants__stock__lte=stock_threshold)
         ).distinct()
-
 
     is_featured = request.GET.get("is_featured")
     if is_featured:
-        products = products.filter(
-            is_featured=is_featured.lower() == "true"
-        )
+        products = products.filter(is_featured=is_featured.lower() == "true")
 
     is_best_seller = request.GET.get("is_best_seller")
     if is_best_seller:
-        products = products.filter(
-            is_best_seller=is_best_seller.lower() == "true"
-        )
+        products = products.filter(is_best_seller=is_best_seller.lower() == "true")
 
     is_published = request.GET.get("is_published")
     if is_published:
-        products = products.filter(
-            is_published=is_published.lower() == "true"
-        )
+        products = products.filter(is_published=is_published.lower() == "true")
 
-    # PRICE FILTER
     if min_price:
         products = products.filter(price__gte=min_price)
-
     if max_price:
         products = products.filter(price__lte=max_price)
 
     total_products = products.count()
-
     products = products[offset:offset + limit]
 
     data = []
-    
-
     for product in products:
+        has_size_pricing = bool(getattr(product, "has_size_pricing", False))
         variants = []
 
-        if product.product_type == "variant":
-
+        if product.product_type == "variant" and not has_size_pricing:
             variants = [
                 {
                     "id": variant.id,
                     "sku": variant.sku,
                     "stock": variant.stock,
                     "is_active": variant.is_active,
-
                     "options": [
-                        {
-                            "option_name": option.option_name,
-                            "option_value": option.option_value,
-                        }
+                        {"option_name": option.option_name,
+                         "option_value": option.option_value}
                         for option in variant.options.all()
                     ],
-
-                    "images": [
-                        image.image.url
-                        for image in variant.images.all()
-                        if image.image
-                    ]
+                    "images": [image.image.url for image in variant.images.all()
+                               if image.image],
                 }
                 for variant in product.variants.all()
-                if (
-                    not (low_stock and low_stock.lower() == "true")
-                    or variant.stock <= stock_threshold
-                )
+                if not (low_stock and low_stock.lower() == "true")
+                or variant.stock <= stock_threshold
             ]
+
+        # Preserve the existing Fine Art size response. Size-pricing products
+        # expose ProductSize records separately to avoid mixing model types.
+        fine_art_sizes = [
+            {"size": size.size, "price": str(size.price)}
+            for size in product.sizes.all()
+        ]
+
+        product_sizes = [
+            {
+                "id": size.id,
+                "color_id": size.color_id,
+                "color_name": size.color.color_name if size.color else None,
+                "size": size.size,
+                "price": str(size.price),
+                "stock": size.stock,
+                "supplier_cost": str(size.supplier_cost) if size.supplier_cost is not None else None,
+            }
+            for size in product.product_sizes.all()
+        ] if product.product_type == "variant" and has_size_pricing else []
+
+        colors = [
+            {
+                "id": color.id,
+                "color_name": color.color_name,
+                "image": color.image.url if color.image else None,
+                "gallery": [
+                    {"id": image.id, "image": image.image.url, "order": image.order}
+                    for image in color.gallery.all() if image.image
+                ],
+                "sizes": [
+                    {
+                        "id": size.id,
+                        "size": size.size,
+                        "price": str(size.price),
+                        "stock": size.stock,
+                        "supplier_cost": str(size.supplier_cost) if size.supplier_cost is not None else None,
+                    }
+                    for size in color.sizes.all()
+                ] if has_size_pricing else [],
+            }
+            for color in product.colors.all()
+        ]
+
+        if product.product_type == "fine_art":
+            is_low_stock = product.stock <= stock_threshold
+        elif has_size_pricing:
+            is_low_stock = any(size.stock <= stock_threshold for size in product.product_sizes.all())
+        else:
+            is_low_stock = any(variant.stock <= stock_threshold for variant in product.variants.all())
 
         data.append({
             "id": product.id,
-
             "name": product.name,
-
             "product_type": product.product_type,
-
-
-            "category": {
-                "id": product.category.id,
-                "name": product.category.name
-            } if product.category else None,
-
-            "subcategory": {
-                "id": product.subcategory.id,
-                "name": product.subcategory.name
-            } if product.subcategory else None,
-
-            "brand": {
-                "id": product.brand.id,
-                "name": product.brand.name
-            } if product.brand else None,
-
-            "supplier": {
-                "id": product.supplier.id,
-                "name": product.supplier.name
-            } if product.supplier else None,
-
+            "has_size_pricing": has_size_pricing,
+            "category": {"id": product.category.id, "name": product.category.name} if product.category else None,
+            "subcategory": {"id": product.subcategory.id, "name": product.subcategory.name} if product.subcategory else None,
+            "brand": {"id": product.brand.id, "name": product.brand.name} if product.brand else None,
+            "supplier": {"id": product.supplier.id, "name": product.supplier.name} if product.supplier else None,
             "price": str(product.price),
-
             "description": product.description,
-
-            "stock": (
-                product.stock
-                if product.product_type == "fine_art"
-                else None
-            ),
-
+            "stock": product.stock if product.product_type == "fine_art" else None,
             "image": product.image.url if product.image else None,
-
             "created_at": product.created_at,
-
             "is_featured": product.is_featured,
-
             "is_best_seller": product.is_best_seller,
-
             "specification": product.specification,
-
-
             "weight": str(product.weight),
             "length": str(product.length),
             "width": str(product.width),
             "height": str(product.height),
-
-            "sizes": [
-                {
-                    "size": s.size,
-                    "price": str(s.price)
-                }
-                for s in product.sizes.all()
-            ],
-
-            "colors": [
-                {
-                    "color_name": c.color_name,
-                    "image": c.image.url if c.image else None
-                }
-                for c in product.colors.all()
-            ],
-
-            "gallery": [
-                img.image.url
-                for img in product.gallery.all()
-                if img.image
-            ],
+            "sizes": fine_art_sizes,
+            "product_sizes": product_sizes,
+            "colors": colors,
+            "gallery": [img.image.url for img in product.gallery.all() if img.image],
             "frames": [
-                {
-                    "id": f.id,
-                    "name": f.name,
-                    "extra_price": str(f.extra_price) if hasattr(f, "extra_price") else None
-                }
-                for f in product.frames.all()
+                {"id": frame.id, "name": frame.name,
+                 "extra_price": str(frame.extra_price) if hasattr(frame, "extra_price") else None}
+                for frame in product.frames.all()
             ],
-
             "materials": [
-                {
-                    "id": m.id,
-                    "name": m.name,
-                    "extra_price": str(m.extra_price) if hasattr(m, "extra_price") else None
-                }
-                for m in product.materials.all()
+                {"id": material.id, "name": material.name,
+                 "extra_price": str(material.extra_price) if hasattr(material, "extra_price") else None}
+                for material in product.materials.all()
             ],
-
             "variants": variants,
-
-            "is_low_stock": (
-                product.stock <= stock_threshold
-                if product.product_type == "fine_art"
-                else any(
-                    variant.stock <= stock_threshold
-                    for variant in product.variants.all()
-                )
-            ),
-            
+            "is_low_stock": is_low_stock,
             "is_published": product.is_published,
         })
 
@@ -992,6 +1393,836 @@ def view_products(request):
         "total_pages": (total_products + limit - 1) // limit,
         "products": data,
     }, status=200)
+
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+@admin_access(StoreManagerOrSuperAdmin)
+def view_single_product(request, product_id):
+    try:
+        product = Product.objects.select_related(
+            "category", "subcategory", "brand", "supplier"
+        ).prefetch_related(
+            "sizes",
+            "colors__gallery",
+            "product_sizes__color",
+            "gallery",
+            "frames",
+            "materials",
+            "variants__options",
+            "variants__images",
+        ).get(id=product_id)
+
+        has_size_pricing = bool(getattr(product, "has_size_pricing", False))
+        variants = []
+        if product.product_type == "variant" and not has_size_pricing:
+            variants = [
+                {
+                    "id": variant.id,
+                    "sku": variant.sku,
+                    "stock": variant.stock,
+                    "is_active": variant.is_active,
+                    "options": [
+                        {"id": option.id, "option_name": option.option_name,
+                         "option_value": option.option_value}
+                        for option in variant.options.all()
+                    ],
+                    "images": [
+                        {"id": image.id, "image": image.image.url, "order": image.order}
+                        for image in variant.images.all() if image.image
+                    ],
+                }
+                for variant in product.variants.all()
+            ]
+
+        data = {
+            "id": product.id,
+            "name": product.name,
+            "product_type": product.product_type,
+            "has_size_pricing": has_size_pricing,
+            "category": {"id": product.category.id, "name": product.category.name} if product.category else None,
+            "subcategory": {"id": product.subcategory.id, "name": product.subcategory.name} if product.subcategory else None,
+            "brand": {"id": product.brand.id, "name": product.brand.name} if product.brand else None,
+            "supplier": {
+                "id": product.supplier.id,
+                "name": product.supplier.name,
+                "email": product.supplier.email,
+                "phone": product.supplier.phone,
+                "wechat_id": product.supplier.wechat_id,
+                "country": product.supplier.country,
+                "address": product.supplier.address,
+                "notes": product.supplier.notes,
+            } if product.supplier else None,
+            "price": str(product.price),
+            "supplier_cost": str(product.supplier_cost) if product.supplier_cost is not None else None,
+            "description": product.description,
+            "specification": product.specification,
+            "stock": product.stock if product.product_type == "fine_art" else None,
+            "image": product.image.url if product.image else None,
+            "created_at": product.created_at,
+            "is_featured": product.is_featured,
+            "is_best_seller": product.is_best_seller,
+            "is_published": product.is_published,
+            "weight": str(product.weight),
+            "length": str(product.length),
+            "width": str(product.width),
+            "height": str(product.height),
+            # Existing Fine Art size records; kept unchanged.
+            "sizes": [
+                {"id": size.id, "size": size.size, "price": str(size.price)}
+                for size in product.sizes.all()
+            ],
+            # New size-pricing records, including size-only products.
+            "product_sizes": [
+                {
+                    "id": size.id,
+                    "color_id": size.color_id,
+                    "color_name": size.color.color_name if size.color else None,
+                    "size": size.size,
+                    "price": str(size.price),
+                    "stock": size.stock,
+                    "supplier_cost": str(size.supplier_cost) if size.supplier_cost is not None else None,
+                }
+                for size in product.product_sizes.all()
+            ] if product.product_type == "variant" and has_size_pricing else [],
+            "colors": [
+                {
+                    "id": color.id,
+                    "color_name": color.color_name,
+                    "image": color.image.url if color.image else None,
+                    "gallery": [
+                        {"id": image.id, "image": image.image.url, "order": image.order}
+                        for image in color.gallery.all() if image.image
+                    ],
+                    "sizes": [
+                        {
+                            "id": size.id,
+                            "size": size.size,
+                            "price": str(size.price),
+                            "stock": size.stock,
+                            "supplier_cost": str(size.supplier_cost) if size.supplier_cost is not None else None,
+                        }
+                        for size in color.sizes.all()
+                    ] if has_size_pricing else [],
+                }
+                for color in product.colors.all()
+            ],
+            "gallery": [
+                {"id": image.id, "image": image.image.url, "order": image.order}
+                for image in product.gallery.all() if image.image
+            ],
+            "frames": [
+                {"id": frame.id, "name": frame.name,
+                 "image": frame.image.url if frame.image else None,
+                 "extra_price": str(frame.extra_price)}
+                for frame in product.frames.all()
+            ],
+            "materials": [
+                {"id": material.id, "name": material.name,
+                 "description": material.description,
+                 "extra_price": str(material.extra_price)}
+                for material in product.materials.all()
+            ],
+            "variants": variants,
+        }
+        return JsonResponse(data, status=200)
+
+    except Product.DoesNotExist:
+        return JsonResponse({"error": "Product not found"}, status=404)
+    except Exception as e:
+        return JsonResponse({"error": "Something went wrong", "details": str(e)}, status=500)
+
+
+
+# from decimal import Decimal, InvalidOperation
+# @api_view(["POST"])
+# @permission_classes([StoreManagerOrSuperAdmin])
+# @transaction.atomic
+# def add_products(request):
+#     try:
+#         supplier_id = request.POST.get("supplier")
+#         name = request.POST.get("name")
+#         category_id = request.POST.get("category")
+#         brand_id = request.POST.get("brand")
+#         price = request.POST.get("price")
+#         description = request.POST.get("description")
+#         stock = request.POST.get("stock")
+#         image = request.FILES.get("image")
+
+#         specification = request.POST.get("specification")
+#         frame_ids = request.POST.get("frame_ids")
+#         material_ids = request.POST.get("material_ids")
+#         supplier_cost = request.POST.get("supplier_cost")
+#         is_published = request.POST.get("is_published","true") in ["true", "True", "1"]
+#         # material_ids = request.data.get("material_ids", [])
+#         supplier = None
+
+#         weight = request.POST.get("weight", 0.50)
+#         length = request.POST.get("length", 10.00)
+#         width = request.POST.get("width", 10.00)
+#         height = request.POST.get("height", 10.00)
+
+
+     
+#         product_type = request.POST.get("product_type")
+#         has_size_pricing = (
+#             request.POST.get("has_size_pricing", "false").lower()
+#             in ["true", "1"]
+#         )
+#         if has_size_pricing and product_type != "variant":
+#             return JsonResponse(
+#                 {"error": "Size pricing is only supported for variant products."},
+#                 status=400
+#             )
+#         if product_type not in ["fine_art", "variant"]:
+#             return JsonResponse(
+#                 {"error": "Invalid product type"},
+#                 status=400
+#             )
+
+#         if product_type == "fine_art":
+#             stock = int(stock) if stock else 0
+#         else:
+#             stock = 0
+
+#         if supplier_id:
+#             supplier = Supplier.objects.filter(id=supplier_id).first()
+
+#             if not supplier:
+#                 return JsonResponse(
+#                     {"error": "Invalid supplier"},
+#                     status=400
+#                 )
+#         if frame_ids:
+#             try:
+#                 frame_ids = json.loads(frame_ids)
+#             except json.JSONDecodeError:
+#                 return JsonResponse({"error": "Invalid frame_ids format"}, status=400)
+#         else:
+#             frame_ids = []
+
+#         if material_ids:
+#             try:
+#                 material_ids = json.loads(material_ids)
+#             except json.JSONDecodeError:
+#                 return JsonResponse({"error": "Invalid material_ids format"}, status=400)
+#         else:
+#             material_ids = []
+
+#         # Convert specification JSON string → dictionary
+#         if specification:
+#             try:
+#                 specification = json.loads(specification)
+#             except json.JSONDecodeError:
+#                 return JsonResponse({"error": "Invalid specification format"}, status=400)
+#         else:
+#             specification = {}
+
+#         if not name:
+#             return JsonResponse({"error": "Product name is required"}, status=400)
+
+#         if not price:
+#             return JsonResponse({"error": "Price is required"}, status=400)
+        
+
+
+#         category = None
+#         if category_id:
+#             category = Category.objects.filter(id=category_id).first()
+#             if not category:
+#                 return JsonResponse({"error": "Invalid category"}, status=400)
+
+#         subcategory_id = request.POST.get("subcategory")
+
+#         subcategory = None
+#         if subcategory_id:
+#             subcategory = SubCategory.objects.filter(id=subcategory_id).first()
+
+#         brand = None
+#         if brand_id:
+#             brand = Brand.objects.filter(id=brand_id).first()
+#             if not brand:
+#                 return JsonResponse({"error": "Invalid brand"}, status=400)
+
+#         is_featured = request.POST.get("is_featured") in ["true", "True", "1"]
+#         is_best_seller = request.POST.get("is_best_seller") in ["true", "True", "1"]
+
+#         product = Product.objects.create(
+#             supplier=supplier,
+#             product_type=product_type,
+#             has_size_pricing=has_size_pricing,
+#             name=name,
+#             category=category,
+#             subcategory=subcategory,
+#             brand=brand,
+#             price=price,
+#             description=description,
+#             stock=stock,
+#             image=image,
+#             is_featured=is_featured,
+#             is_best_seller=is_best_seller,
+#             specification=specification,
+#             is_published=is_published,
+#             supplier_cost=supplier_cost,
+
+#             weight=weight,
+#             length=length,
+#             width=width,
+#             height=height,
+
+#         )
+#         if product.product_type == "fine_art":
+#             if frame_ids:
+#                 product.frames.set(frame_ids)
+
+#             if material_ids:
+#                 product.materials.set(material_ids)
+
+#             # ------------------------
+#             # ADD SIZES
+#             # ------------------------
+#             sizes = request.POST.get("sizes")
+
+#             if sizes:
+#                 try:
+#                     sizes = json.loads(sizes)
+
+#                     for item in sizes:
+#                         FineArtSize.objects.create(
+#                             product=product,
+#                             size=item.get("size"),
+#                             price=item.get("price")
+#                         )
+
+#                 except json.JSONDecodeError:
+#                     return JsonResponse({"error": "Invalid sizes format"}, status=400)
+
+#             # ------------------------
+#             # ADD COLORS
+#             # ------------------------
+#             colors = request.POST.get("colors")
+
+#             if colors:
+#                 try:
+#                     colors = json.loads(colors)
+
+#                     for index, color in enumerate(colors):
+#                         color_image = request.FILES.get(f"color_image_{index}")
+
+#                         ProductColor.objects.create(
+#                             product=product,
+#                             color_name=color.get("color_name"),
+#                             image=color_image
+#                         )
+
+#                 except json.JSONDecodeError:
+#                     return JsonResponse({"error": "Invalid colors format"}, status=400)
+
+#             # ------------------------
+#             # ADD GALLERY IMAGES
+#             # ------------------------
+#             gallery_images = request.FILES.getlist("images")
+
+#             for img in gallery_images:
+#                 ProductImage.objects.create(
+#                     product=product,
+#                     image=img
+#                 )
+
+#             # ------------------------
+#             # FETCH COLORS FOR RESPONSE
+#             # ------------------------
+#             colors = ProductColor.objects.filter(product=product)
+
+#             color_data = [
+#                 {
+#                     "color_name": c.color_name,
+#                     "image": c.image.url if c.image else None
+#                 }
+#                 for c in colors
+#             ]
+
+#             return JsonResponse({
+#                 "id": product.id,
+#                 "name": product.name,
+#                 "category": product.category.id if product.category else None,
+#                 "brand": product.brand.id if product.brand else None,
+#                 "price": str(product.price),
+#                 "supplier": {
+#                         "id": product.supplier.id,
+#                         "name": product.supplier.name
+#                     } if product.supplier else None,
+#                 "subcategory": {
+#                     "id": product.subcategory.id,
+#                     "name": product.subcategory.name
+#                 } if product.subcategory else None,
+#                 "description": product.description,
+#                 "stock": product.stock,
+#                 "image": product.image.url if product.image else None,
+#                 "specification": product.specification,
+#                 "colors": color_data,
+#                 "created_at": product.created_at,
+
+#                 "weight": str(product.weight),
+#                 "length": str(product.length),
+#                 "width": str(product.width),
+#                 "height": str(product.height),
+
+               
+#             }, status=201)
+        
+#         elif product.has_size_pricing:
+
+#             sizes = request.POST.get("sizes")
+
+#             if not sizes:
+#                 return JsonResponse(
+#                     {"error": "Sizes are required for this product."},
+#                     status=400
+#                 )
+
+#             try:
+#                 sizes = json.loads(sizes)
+
+#                 for item in sizes:
+#                     size_name = item.get("size")
+#                     size_price = item.get("price")
+#                     try: 
+
+#                         size_stock = int(item.get("stock", 0))
+#                         size_price = Decimal(str(size_price))
+#                     except (TypeError, ValueError, InvalidOperation):
+#                         return JsonResponse(
+#                             {"error": "Invalid size price or stock."},
+#                             status=400
+#                         )
+#                     if (
+#                         not size_name
+#                         or not str(size_name).strip()
+#                         or size_price <= 0
+#                         or size_stock < 0
+#                     ):
+#                         return JsonResponse(
+#                             {"error": "Invalid size details."},
+#                             status=400
+#                         )
+
+
+#                     ProductSize.objects.create(
+#                         product=product,
+#                         size=size_name,
+#                         price=size_price,
+#                         stock=size_stock
+#                     )
+
+#             except (json.JSONDecodeError, TypeError, ValueError):
+#                 return JsonResponse(
+#                     {"error": "Invalid sizes format."},
+#                     status=400
+#                 )
+
+#             return JsonResponse({
+#                 "message": "Size-priced product created successfully.",
+#                 "product_id": product.id,
+#                 "sizes": [
+#                     {
+#                         "id": s.id,
+#                         "size": s.size,
+#                         "price": str(s.price),
+#                         "stock": s.stock
+#                     }
+#                     for s in product.product_sizes.all()
+#                 ]
+#             }, status=201)
+#         else:
+#             variants = request.POST.get("variants")
+
+#             if not variants:
+#                 return JsonResponse(
+#                     {"error": "Variants are required."},
+#                     status=400
+#                 )
+
+#             try:
+#                 variants = json.loads(variants)
+#             except json.JSONDecodeError:
+#                 return JsonResponse(
+#                     {"error": "Invalid variants format."},
+#                     status=400
+#                 )
+#             # variant_response = []
+
+#             for index, variant in enumerate(variants):
+
+#                 sku = variant.get("sku")
+#                 try:
+#                     stock = int(variant.get("stock", 0))
+#                 except (TypeError, ValueError):
+#                     return JsonResponse(
+#                         {"error": "Invalid variant stock."},
+#                         status=400
+#                     )
+#                 options = variant.get("options", [])
+
+#                 if not sku:
+#                     return JsonResponse(
+#                         {"error": "Each variant must have a SKU."},
+#                         status=400
+#                     )
+
+#                 if ProductVariant.objects.filter(sku=sku).exists():
+#                     return JsonResponse(
+#                         {"error": f"SKU '{sku}' already exists."},
+#                         status=400
+#                     )
+
+#                 created_variant = ProductVariant.objects.create(
+#                     product=product,
+#                     sku=sku,
+#                     stock=stock
+#                 )
+
+#                 # ------------------------
+#                 # SAVE OPTIONS
+#                 # ------------------------
+#                 for option in options:
+#                     ProductVariantOption.objects.create(
+#                         variant=created_variant,
+#                         option_name=option.get("option_name"),
+#                         option_value=option.get("option_value")
+#                     )
+
+#                     # ------------------------
+#                     # SAVE VARIANT IMAGES
+#                     # ------------------------
+#                 variant_images = request.FILES.getlist(
+#                     f"variant_images_{index}"
+#                 )
+
+#                 for order, img in enumerate(variant_images):
+#                     ProductVariantImage.objects.create(
+#                         variant=created_variant,
+#                         image=img,
+#                         order=order
+#                     )
+#             variant_data = []
+
+#             for variant in product.variants.prefetch_related(
+#                 "options",
+#                 "images"
+#             ):
+#                 variant_data.append({
+#                     "id": variant.id,
+#                     "sku": variant.sku,
+#                     "stock": variant.stock,
+#                     "options": [
+#                         {
+#                             "option_name": option.option_name,
+#                             "option_value": option.option_value,
+#                         }
+#                         for option in variant.options.all()
+#                     ],
+#                     "images": [
+#                         image.image.url
+#                         for image in variant.images.all()
+#                     ]
+#                 })
+
+#             return JsonResponse(
+#                 {
+#                     "message": "Variant product created successfully.",
+#                     "product_id": product.id,
+#                     "total_variants": len(variant_data),
+#                     "variants": variant_data
+#                 },
+#                 status=201
+#             )
+#     except Exception as e:
+#         transaction.set_rollback(True)
+
+#         return JsonResponse({
+#             "error": "Something went wrong",
+#             "details": str(e)
+#         }, status=500)
+
+#     # except Exception as e:
+#     #     return JsonResponse({
+#     #         "error": "Something went wrong",
+#     #         "details": str(e)
+#     #     }, status=500)
+    
+
+
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+from ChronasAdmin.models import ProductColor
+from django.http import JsonResponse
+from django.db.models import Q
+
+
+# @csrf_exempt
+# @require_http_methods(["GET"])
+# @admin_access(StoreManagerOrSuperAdmin)
+# def view_products(request):
+
+#     category = request.GET.get("category")
+#     subcategory = request.GET.get("subcategory")
+#     search = request.GET.get("search")
+#     min_price = request.GET.get("min_price")
+#     max_price = request.GET.get("max_price")
+    
+#     low_stock = request.GET.get("low_stock")
+#     try:
+#         stock_threshold = int(
+#             request.GET.get("stock_threshold", 10)
+#         )
+#     except ValueError:
+#         return JsonResponse(
+#             {"error": "Invalid stock_threshold"},
+#             status=400
+#     )
+
+#     try:
+#         page = int(request.GET.get("page", 1))
+#         limit = int(request.GET.get("limit", 12))
+#     except ValueError:
+#         return JsonResponse({"error": "Invalid pagination values"}, status=400)
+
+#     offset = (page - 1) * limit
+
+#     products = Product.objects.select_related(
+#             "category",
+#             "subcategory",
+#             "brand",
+#             "supplier"
+#         ).prefetch_related(
+#             "sizes",
+#             "colors",
+#             "gallery",
+#             "frames",
+#             "materials",
+#             "variants__options",
+#             "variants__images",
+#         )
+
+#     # CATEGORY FILTER
+#     if category:
+#         if category.isdigit():
+#             products = products.filter(category__id=category)
+#         else:
+#             products = products.filter(category__name__icontains=category)
+
+#     # SUBCATEGORY FILTER
+#     if subcategory:
+#         if subcategory.isdigit():
+#             products = products.filter(subcategory__id=subcategory)
+#         else:
+#             products = products.filter(subcategory__name__icontains=subcategory)
+
+#     # SEARCH
+#     if search:
+#         products = products.filter(
+#             Q(name__icontains=search) |
+#             Q(brand__name__icontains=search) |
+#             Q(category__name__icontains=search) |
+#             Q(subcategory__name__icontains=search)
+#         )
+
+#     # LOW STOCK FILTER    
+#     if low_stock and low_stock.lower() == "true":
+#         products = products.filter(
+#             Q(
+#                 product_type="fine_art",
+#                 stock__lte=stock_threshold
+#             ) |
+#             Q(
+#                 product_type="variant",
+#                 variants__stock__lte=stock_threshold
+#             )
+#         ).distinct()
+
+
+#     is_featured = request.GET.get("is_featured")
+#     if is_featured:
+#         products = products.filter(
+#             is_featured=is_featured.lower() == "true"
+#         )
+
+#     is_best_seller = request.GET.get("is_best_seller")
+#     if is_best_seller:
+#         products = products.filter(
+#             is_best_seller=is_best_seller.lower() == "true"
+#         )
+
+#     is_published = request.GET.get("is_published")
+#     if is_published:
+#         products = products.filter(
+#             is_published=is_published.lower() == "true"
+#         )
+
+#     # PRICE FILTER
+#     if min_price:
+#         products = products.filter(price__gte=min_price)
+
+#     if max_price:
+#         products = products.filter(price__lte=max_price)
+
+#     total_products = products.count()
+
+#     products = products[offset:offset + limit]
+
+#     data = []
+    
+
+#     for product in products:
+#         variants = []
+
+#         if product.product_type == "variant":
+
+#             variants = [
+#                 {
+#                     "id": variant.id,
+#                     "sku": variant.sku,
+#                     "stock": variant.stock,
+#                     "is_active": variant.is_active,
+
+#                     "options": [
+#                         {
+#                             "option_name": option.option_name,
+#                             "option_value": option.option_value,
+#                         }
+#                         for option in variant.options.all()
+#                     ],
+
+#                     "images": [
+#                         image.image.url
+#                         for image in variant.images.all()
+#                         if image.image
+#                     ]
+#                 }
+#                 for variant in product.variants.all()
+#                 if (
+#                     not (low_stock and low_stock.lower() == "true")
+#                     or variant.stock <= stock_threshold
+#                 )
+#             ]
+
+#         data.append({
+#             "id": product.id,
+
+#             "name": product.name,
+
+#             "product_type": product.product_type,
+
+
+#             "category": {
+#                 "id": product.category.id,
+#                 "name": product.category.name
+#             } if product.category else None,
+
+#             "subcategory": {
+#                 "id": product.subcategory.id,
+#                 "name": product.subcategory.name
+#             } if product.subcategory else None,
+
+#             "brand": {
+#                 "id": product.brand.id,
+#                 "name": product.brand.name
+#             } if product.brand else None,
+
+#             "supplier": {
+#                 "id": product.supplier.id,
+#                 "name": product.supplier.name
+#             } if product.supplier else None,
+
+#             "price": str(product.price),
+
+#             "description": product.description,
+
+#             "stock": (
+#                 product.stock
+#                 if product.product_type == "fine_art"
+#                 else None
+#             ),
+
+#             "image": product.image.url if product.image else None,
+
+#             "created_at": product.created_at,
+
+#             "is_featured": product.is_featured,
+
+#             "is_best_seller": product.is_best_seller,
+
+#             "specification": product.specification,
+
+
+#             "weight": str(product.weight),
+#             "length": str(product.length),
+#             "width": str(product.width),
+#             "height": str(product.height),
+
+#             "sizes": [
+#                 {
+#                     "size": s.size,
+#                     "price": str(s.price)
+#                 }
+#                 for s in product.sizes.all()
+#             ],
+
+#             "colors": [
+#                 {
+#                     "color_name": c.color_name,
+#                     "image": c.image.url if c.image else None
+#                 }
+#                 for c in product.colors.all()
+#             ],
+
+#             "gallery": [
+#                 img.image.url
+#                 for img in product.gallery.all()
+#                 if img.image
+#             ],
+#             "frames": [
+#                 {
+#                     "id": f.id,
+#                     "name": f.name,
+#                     "extra_price": str(f.extra_price) if hasattr(f, "extra_price") else None
+#                 }
+#                 for f in product.frames.all()
+#             ],
+
+#             "materials": [
+#                 {
+#                     "id": m.id,
+#                     "name": m.name,
+#                     "extra_price": str(m.extra_price) if hasattr(m, "extra_price") else None
+#                 }
+#                 for m in product.materials.all()
+#             ],
+
+#             "variants": variants,
+
+#             "is_low_stock": (
+#                 product.stock <= stock_threshold
+#                 if product.product_type == "fine_art"
+#                 else any(
+#                     variant.stock <= stock_threshold
+#                     for variant in product.variants.all()
+#                 )
+#             ),
+            
+#             "is_published": product.is_published,
+#         })
+
+#     return JsonResponse({
+#         "page": page,
+#         "limit": limit,
+#         "total_products": total_products,
+#         "total_pages": (total_products + limit - 1) // limit,
+#         "products": data,
+#     }, status=200)
 
 
 
@@ -1008,10 +2239,6 @@ from django.views.decorators.http import require_http_methods
 
 import cloudinary.uploader
 
-
-@csrf_exempt
-@require_http_methods(["POST"])
-@admin_access(StoreManagerOrSuperAdmin)
 def update_product(request, product_id):
 
     def parse_json_field(field_name, default=None):
@@ -1429,12 +2656,82 @@ def update_product(request, product_id):
                         )
 
             # --------------------------------------------------
+            # SIZE-PRICING VALIDATION
+            # --------------------------------------------------
+
+            has_size_pricing = bool(getattr(product, "has_size_pricing", False))
+            size_pricing_sizes = None
+            size_pricing_colors = None
+
+            if product_type == "variant" and has_size_pricing:
+                size_pricing_sizes = parse_json_field("sizes")
+                size_pricing_colors = parse_json_field("colors")
+
+                def validate_product_size_entry(item, label="sizes"):
+                    validate_object(item, label)
+                    size_name = str(item.get("size", "")).strip()
+                    if not size_name:
+                        raise ValueError("Each size must have a size name.")
+
+                    size_price = parse_decimal(item.get("price"), "size price")
+                    if size_price is None or size_price <= 0:
+                        raise ValueError("Each size must have a price greater than zero.")
+
+                    size_stock = parse_integer(item.get("stock", 0), "size stock")
+                    raw_cost = item.get("supplier_cost")
+                    size_cost = parse_decimal(raw_cost, "size supplier cost")
+                    if size_cost is not None and size_cost < 0:
+                        raise ValueError("Size supplier cost cannot be negative.")
+                    return size_name, size_price, size_stock, size_cost
+
+                if size_pricing_colors is not None:
+                    validate_list(size_pricing_colors, "colors")
+                    seen_colors = set()
+                    for color_item in size_pricing_colors:
+                        validate_object(color_item, "colors")
+                        color_name = str(color_item.get("color_name", "")).strip()
+                        if not color_name:
+                            raise ValueError("Each color must have a name.")
+                        color_key = color_name.casefold()
+                        if color_key in seen_colors:
+                            raise ValueError(f"Duplicate color '{color_name}'.")
+                        seen_colors.add(color_key)
+
+                        color_sizes = color_item.get("sizes")
+                        if color_sizes is None:
+                            raise ValueError(f"Sizes are required for color '{color_name}'.")
+                        validate_list(color_sizes, f"sizes for {color_name}")
+                        seen_sizes = set()
+                        for size_item in color_sizes:
+                            size_name, _, _, _ = validate_product_size_entry(
+                                size_item, f"sizes for {color_name}"
+                            )
+                            size_key = size_name.casefold()
+                            if size_key in seen_sizes:
+                                raise ValueError(
+                                    f"Duplicate size '{size_name}' for color '{color_name}'."
+                                )
+                            seen_sizes.add(size_key)
+
+                elif size_pricing_sizes is not None:
+                    validate_list(size_pricing_sizes, "sizes")
+                    if not size_pricing_sizes:
+                        raise ValueError("At least one size is required.")
+                    seen_sizes = set()
+                    for size_item in size_pricing_sizes:
+                        size_name, _, _, _ = validate_product_size_entry(size_item)
+                        size_key = size_name.casefold()
+                        if size_key in seen_sizes:
+                            raise ValueError(f"Duplicate size '{size_name}'.")
+                        seen_sizes.add(size_key)
+
+            # --------------------------------------------------
             # VARIANT VALIDATION
             # --------------------------------------------------
 
             variants = None
 
-            if product_type == "variant":
+            if product_type == "variant" and not has_size_pricing:
 
                 variants_raw = request.POST.get("variants")
 
@@ -1783,6 +3080,159 @@ def update_product(request, product_id):
                     )
 
             # --------------------------------------------------
+            # SIZE-PRICING UPDATE
+            # --------------------------------------------------
+
+            elif product_type == "variant" and has_size_pricing:
+
+                def ensure_size_not_in_cart(size_obj):
+                    # Do not remove a size that is still referenced by an active cart.
+                    if CartItem.objects.filter(product_size_id=size_obj.id).exists():
+                        raise ValueError(
+                            f"Cannot remove size '{size_obj.size}' because it is present in a customer cart."
+                        )
+
+                def sync_size_rows(size_list, color_obj=None):
+                    if color_obj is not None:
+                        queryset = ProductSize.objects.filter(
+                            product=product, color=color_obj
+                        )
+                    else:
+                        queryset = ProductSize.objects.filter(
+                            product=product, color__isnull=True
+                        )
+
+                    existing = {obj.id: obj for obj in queryset}
+                    received = set()
+                    seen_names = set()
+
+                    for size_item in size_list:
+                        size_name, size_price, size_stock, size_cost = validate_product_size_entry(size_item)
+                        name_key = size_name.casefold()
+                        if name_key in seen_names:
+                            raise ValueError(f"Duplicate size '{size_name}'.")
+                        seen_names.add(name_key)
+
+                        size_id = size_item.get("id")
+                        if size_id not in (None, ""):
+                            if not str(size_id).isdigit():
+                                raise ValueError("Invalid product size ID.")
+                            size_id = int(size_id)
+                            if size_id not in existing:
+                                raise ValueError(
+                                    f"Size {size_id} does not belong to this product/color."
+                                )
+                            size_obj = existing[size_id]
+                            size_obj.size = size_name
+                            size_obj.price = size_price
+                            size_obj.stock = size_stock
+                            size_obj.supplier_cost = size_cost
+                            size_obj.save()
+                        else:
+                            size_obj = ProductSize.objects.create(
+                                product=product,
+                                color=color_obj,
+                                size=size_name,
+                                price=size_price,
+                                stock=size_stock,
+                                supplier_cost=size_cost,
+                            )
+                        received.add(size_obj.id)
+
+                    for old_id, old_obj in existing.items():
+                        if old_id not in received:
+                            ensure_size_not_in_cart(old_obj)
+                            # OrderItem.product_size uses SET_NULL and snapshots retain history.
+                            old_obj.delete()
+
+                if size_pricing_colors is not None:
+                    # This product is in colour + size mode. A submitted empty list
+                    # is rejected to prevent accidental deletion of every colour.
+                    if not size_pricing_colors:
+                        raise ValueError("At least one color is required for a color-based size product.")
+
+                    # Do not silently change between size-only and color-based modes.
+                    if product.product_sizes.filter(color__isnull=True).exists():
+                        raise ValueError("This product currently has size-only pricing. Convert its pricing mode explicitly before editing colors.")
+
+                    existing_colors = {obj.id: obj for obj in product.colors.all()}
+                    received_color_ids = set()
+                    seen_color_names = set()
+
+                    for index, color_item in enumerate(size_pricing_colors):
+                        color_name = str(color_item.get("color_name", "")).strip()
+                        name_key = color_name.casefold()
+                        if name_key in seen_color_names:
+                            raise ValueError(f"Duplicate color '{color_name}'.")
+                        seen_color_names.add(name_key)
+
+                        color_id = color_item.get("id")
+                        color_image = request.FILES.get(f"color_image_{index}")
+
+                        if color_id not in (None, ""):
+                            if not str(color_id).isdigit():
+                                raise ValueError("Invalid color ID.")
+                            color_id = int(color_id)
+                            if color_id not in existing_colors:
+                                raise ValueError(f"Color {color_id} does not belong to this product.")
+                            color_obj = existing_colors[color_id]
+                            color_obj.color_name = color_name
+                            if color_image:
+                                delete_cloudinary_file(color_obj.image)
+                                color_obj.image = color_image
+                            elif color_item.get("remove_image") is True:
+                                delete_cloudinary_file(color_obj.image)
+                                color_obj.image = None
+                            color_obj.save()
+                        else:
+                            color_obj = ProductColor.objects.create(
+                                product=product,
+                                color_name=color_name,
+                                image=color_image,
+                            )
+
+                        received_color_ids.add(color_obj.id)
+                        sync_size_rows(color_item["sizes"], color_obj=color_obj)
+
+                        # Per-colour gallery: omitted IDs mean retain existing images.
+                        gallery_ids_raw = color_item.get("existing_gallery_image_ids")
+                        if gallery_ids_raw is None:
+                            keep_gallery_ids = {img.id for img in color_obj.gallery.all()}
+                        else:
+                            keep_gallery_ids = normalize_ids(
+                                gallery_ids_raw, "existing_gallery_image_ids"
+                            )
+                        new_color_images = request.FILES.getlist(f"color_images_{index}")
+                        sync_image_records(
+                            color_obj.gallery.all(),
+                            keep_gallery_ids,
+                            new_color_images,
+                            lambda img, order, c=color_obj: ProductColorImage.objects.create(
+                                color=c, image=img, order=order
+                            ),
+                        )
+
+                    for old_color_id, old_color in existing_colors.items():
+                        if old_color_id not in received_color_ids:
+                            old_sizes = list(old_color.sizes.all())
+                            for old_size in old_sizes:
+                                ensure_size_not_in_cart(old_size)
+                            for gallery_image in old_color.gallery.all():
+                                delete_cloudinary_file(gallery_image.image)
+                            delete_cloudinary_file(old_color.image)
+                            # ProductSize.color is PROTECT, so remove its sizes first.
+                            old_color.sizes.all().delete()
+                            old_color.delete()
+
+                elif size_pricing_sizes is not None:
+                    # Size-only mode must not silently erase existing colour data.
+                    if product.colors.exists() or product.product_sizes.filter(color__isnull=False).exists():
+                        raise ValueError("This product currently has color-based pricing. Submit the colors payload to update it.")
+                    sync_size_rows(size_pricing_sizes, color_obj=None)
+
+                # No sizes/colors payload means the size-pricing data remains unchanged.
+
+            # --------------------------------------------------
             # VARIANT UPDATE
             # --------------------------------------------------
 
@@ -1959,6 +3409,8 @@ def update_product(request, product_id):
             },
             status=500
         )
+
+
 
 
 
@@ -2896,177 +4348,177 @@ def update_product(request, product_id):
 #         )
 
 
-@csrf_exempt
-@require_http_methods(["GET"])
-@admin_access(StoreManagerOrSuperAdmin)
-def view_single_product(request, product_id):
-    try:
-        product = Product.objects.select_related(
-            "category",
-            "subcategory",
-            "brand",
-            "supplier"
-        ).prefetch_related(
-            "sizes",
-            "colors",
-            "gallery",
-            "frames",
-            "materials",
-            "variants__options",
-            "variants__images"
-        ).get(id=product_id)
+# @csrf_exempt
+# @require_http_methods(["GET"])
+# @admin_access(StoreManagerOrSuperAdmin)
+# def view_single_product(request, product_id):
+#     try:
+#         product = Product.objects.select_related(
+#             "category",
+#             "subcategory",
+#             "brand",
+#             "supplier"
+#         ).prefetch_related(
+#             "sizes",
+#             "colors",
+#             "gallery",
+#             "frames",
+#             "materials",
+#             "variants__options",
+#             "variants__images"
+#         ).get(id=product_id)
 
-        variants = []
+#         variants = []
 
-        if product.product_type == "variant":
-            variants = [
-                {
-                    "id": variant.id,
-                    "sku": variant.sku,
-                    "stock": variant.stock,
-                    "is_active": variant.is_active,
+#         if product.product_type == "variant":
+#             variants = [
+#                 {
+#                     "id": variant.id,
+#                     "sku": variant.sku,
+#                     "stock": variant.stock,
+#                     "is_active": variant.is_active,
 
-                    "options": [
-                        {
-                            "id": option.id,
-                            "option_name": option.option_name,
-                            "option_value": option.option_value,
-                        }
-                        for option in variant.options.all()
-                    ],
+#                     "options": [
+#                         {
+#                             "id": option.id,
+#                             "option_name": option.option_name,
+#                             "option_value": option.option_value,
+#                         }
+#                         for option in variant.options.all()
+#                     ],
 
-                    "images": [
-                        {
-                            "id": image.id,
-                            "image": image.image.url,
-                            "order": image.order,
-                        }
-                        for image in variant.images.all()
-                        if image.image
-                    ],
-                }
-                for variant in product.variants.all()
-            ]
+#                     "images": [
+#                         {
+#                             "id": image.id,
+#                             "image": image.image.url,
+#                             "order": image.order,
+#                         }
+#                         for image in variant.images.all()
+#                         if image.image
+#                     ],
+#                 }
+#                 for variant in product.variants.all()
+#             ]
 
-        data = {
-            "id": product.id,
-            "name": product.name,
-            "product_type": product.product_type,
+#         data = {
+#             "id": product.id,
+#             "name": product.name,
+#             "product_type": product.product_type,
 
-            "category": {
-                "id": product.category.id,
-                "name": product.category.name,
-            } if product.category else None,
+#             "category": {
+#                 "id": product.category.id,
+#                 "name": product.category.name,
+#             } if product.category else None,
 
-            "subcategory": {
-                "id": product.subcategory.id,
-                "name": product.subcategory.name,
-            } if product.subcategory else None,
+#             "subcategory": {
+#                 "id": product.subcategory.id,
+#                 "name": product.subcategory.name,
+#             } if product.subcategory else None,
 
-            "brand": {
-                "id": product.brand.id,
-                "name": product.brand.name,
-            } if product.brand else None,
+#             "brand": {
+#                 "id": product.brand.id,
+#                 "name": product.brand.name,
+#             } if product.brand else None,
 
-            "supplier": {
-                "id": product.supplier.id,
-                "name": product.supplier.name,
-                "email": product.supplier.email,
-                "phone": product.supplier.phone,
-                "wechat_id": product.supplier.wechat_id,
-                "country": product.supplier.country,
-                "address": product.supplier.address,
-                "notes": product.supplier.notes,
-            } if product.supplier else None,
+#             "supplier": {
+#                 "id": product.supplier.id,
+#                 "name": product.supplier.name,
+#                 "email": product.supplier.email,
+#                 "phone": product.supplier.phone,
+#                 "wechat_id": product.supplier.wechat_id,
+#                 "country": product.supplier.country,
+#                 "address": product.supplier.address,
+#                 "notes": product.supplier.notes,
+#             } if product.supplier else None,
 
-            "price": str(product.price),
-            "supplier_cost": str(product.supplier_cost) if product.supplier_cost else None,
+#             "price": str(product.price),
+#             "supplier_cost": str(product.supplier_cost) if product.supplier_cost else None,
 
-            "description": product.description,
-            "specification": product.specification,
+#             "description": product.description,
+#             "specification": product.specification,
 
-            "stock": product.stock if product.product_type == "fine_art" else None,
+#             "stock": product.stock if product.product_type == "fine_art" else None,
 
-            "image": product.image.url if product.image else None,
+#             "image": product.image.url if product.image else None,
 
-            "created_at": product.created_at,
+#             "created_at": product.created_at,
 
-            "is_featured": product.is_featured,
-            "is_best_seller": product.is_best_seller,
-            "is_published": product.is_published,
+#             "is_featured": product.is_featured,
+#             "is_best_seller": product.is_best_seller,
+#             "is_published": product.is_published,
 
-            "weight": str(product.weight),
-            "length": str(product.length),
-            "width": str(product.width),
-            "height": str(product.height),
+#             "weight": str(product.weight),
+#             "length": str(product.length),
+#             "width": str(product.width),
+#             "height": str(product.height),
 
-            "sizes": [
-                {
-                    "id": size.id,
-                    "size": size.size,
-                    "price": str(size.price),
-                }
-                for size in product.sizes.all()
-            ],
+#             "sizes": [
+#                 {
+#                     "id": size.id,
+#                     "size": size.size,
+#                     "price": str(size.price),
+#                 }
+#                 for size in product.sizes.all()
+#             ],
 
-            "colors": [
-                {
-                    "id": color.id,
-                    "color_name": color.color_name,
-                    "image": color.image.url if color.image else None,
-                }
-                for color in product.colors.all()
-            ],
+#             "colors": [
+#                 {
+#                     "id": color.id,
+#                     "color_name": color.color_name,
+#                     "image": color.image.url if color.image else None,
+#                 }
+#                 for color in product.colors.all()
+#             ],
 
-            "gallery": [
-                {
-                    "id": image.id,
-                    "image": image.image.url,
-                    "order": image.order,
-                }
-                for image in product.gallery.all()
-                if image.image
-            ],
+#             "gallery": [
+#                 {
+#                     "id": image.id,
+#                     "image": image.image.url,
+#                     "order": image.order,
+#                 }
+#                 for image in product.gallery.all()
+#                 if image.image
+#             ],
 
-            "frames": [
-                {
-                    "id": frame.id,
-                    "name": frame.name,
-                    "image": frame.image.url if frame.image else None,
-                    "extra_price": str(frame.extra_price),
-                }
-                for frame in product.frames.all()
-            ],
+#             "frames": [
+#                 {
+#                     "id": frame.id,
+#                     "name": frame.name,
+#                     "image": frame.image.url if frame.image else None,
+#                     "extra_price": str(frame.extra_price),
+#                 }
+#                 for frame in product.frames.all()
+#             ],
 
-            "materials": [
-                {
-                    "id": material.id,
-                    "name": material.name,
-                    "description": material.description,
-                    "extra_price": str(material.extra_price),
-                }
-                for material in product.materials.all()
-            ],
+#             "materials": [
+#                 {
+#                     "id": material.id,
+#                     "name": material.name,
+#                     "description": material.description,
+#                     "extra_price": str(material.extra_price),
+#                 }
+#                 for material in product.materials.all()
+#             ],
 
-            "variants": variants,
-        }
+#             "variants": variants,
+#         }
 
-        return JsonResponse(data, status=200)
+#         return JsonResponse(data, status=200)
 
-    except Product.DoesNotExist:
-        return JsonResponse(
-            {"error": "Product not found"},
-            status=404
-        )
+#     except Product.DoesNotExist:
+#         return JsonResponse(
+#             {"error": "Product not found"},
+#             status=404
+#         )
 
-    except Exception as e:
-        return JsonResponse(
-            {
-                "error": "Something went wrong",
-                "details": str(e)
-            },
-            status=500
-        )
+#     except Exception as e:
+#         return JsonResponse(
+#             {
+#                 "error": "Something went wrong",
+#                 "details": str(e)
+#             },
+#             status=500
+#         )
     
 
     
@@ -3150,29 +4602,101 @@ def delete_product(request, product_id):
             status=500
         )
 
+# @require_http_methods(["GET"])
+# @admin_access(StoreManagerOrSuperAdmin)
+# def view_orders(request):
+
+#     # orders = Order.objects.prefetch_related("items__product").all()
+#     orders = Order.objects.prefetch_related("items__product__supplier").all()
+
+#     data = []
+
+#     for order in orders:
+
+#         items = []
+#         for item in order.items.all():
+#             items.append({
+#                 # "product_name": item.product.name,
+#                 "product_name": item.product.name if item.product else "Product unavailable",
+#                 "supplier": (
+#                     item.product.supplier.name
+#                     if item.product and item.product.supplier
+#                     else None
+#                 ),
+#                 "quantity": item.quantity,
+#                 "price": str(item.price),
+#             })
+
+#         data.append({
+#             "id": order.id,
+#             "user": order.user.username if order.user else "Guest",
+#             "email": order.email,
+#             "phone": order.phone,
+#             "status": order.status,
+#             "tracking_link": order.tracking_link,
+#             "shipped_at": order.shipped_at,
+#             "total_amount": str(order.total_amount),
+#             "created_at": order.created_at,
+#             "items": items
+#         })
+
+#     return JsonResponse({"orders": data}, status=200)
+
+
 @require_http_methods(["GET"])
 @admin_access(StoreManagerOrSuperAdmin)
 def view_orders(request):
 
-    # orders = Order.objects.prefetch_related("items__product").all()
-    orders = Order.objects.prefetch_related("items__product__supplier").all()
+    orders = (
+        Order.objects
+        .prefetch_related(
+            "items__product__supplier",
+            "items__product_size",
+            "items__product_size__color",
+        )
+        .all()
+    )
 
     data = []
 
     for order in orders:
 
         items = []
+
         for item in order.items.all():
+
+            product_size = getattr(item, "product_size", None)
+
+            color = (
+                product_size.color
+                if product_size and product_size.color_id
+                else None
+            )
+
             items.append({
-                # "product_name": item.product.name,
-                "product_name": item.product.name if item.product else "Product unavailable",
+                "product_name": (
+                    item.product.name
+                    if item.product else "Product unavailable"
+                ),
+
                 "supplier": (
                     item.product.supplier.name
                     if item.product and item.product.supplier
                     else None
                 ),
+
                 "quantity": item.quantity,
                 "price": str(item.price),
+
+                # New size-pricing details
+                "product_size_id": (
+                    product_size.id if product_size else None
+                ),
+                "size": (
+                    product_size.size if product_size else None
+                ),
+                "color_id": color.id if color else None,
+                "color_name": color.color_name if color else None,
             })
 
         data.append({
@@ -3242,16 +4766,73 @@ def update_order_status(request, order_id):
             status=500
         )
     
+# @require_http_methods(["GET"])
+# @admin_access(StoreManagerOrSuperAdmin)
+# def order_detail_api(request, id):
+#     order = get_object_or_404(
+#         Order.objects.select_related("user")
+#         .prefetch_related(
+#             "items__product__supplier",
+#             "items__size",
+#             "items__frame",
+#             "items__material"
+#         ),
+#         id=id
+#     )
+
+#     items = []
+
+#     for item in order.items.all():
+#         items.append({
+#             "product_name": item.product.name if item.product else None,
+#             "quantity": item.quantity,
+#             "price": float(item.price),
+#             "total": float(item.quantity * item.price),
+
+#             "size": item.size.size if item.size else None,
+#             "frame": item.frame.name if item.frame else None,
+#             "material": item.material.name if item.material else None,
+
+#             "supplier": {
+#                 "id": item.product.supplier.id if item.product and item.product.supplier else None,
+#                 "name": item.product.supplier.name if item.product and item.product.supplier else None,
+#                 "email": item.product.supplier.email if item.product and item.product.supplier else None,
+#                 "phone": item.product.supplier.phone if item.product and item.product.supplier else None,
+#             }
+#         })
+
+#     data = {
+#         "id": order.id,
+#         "customer": order.user.email if order.user else "Guest",
+#         "date": order.created_at,
+#         "status": order.status,
+#         "payment_status": order.payment_status,
+#         "subtotal": float(order.subtotal or 0),
+#         "shipping_charge": float(order.shipping_charge or 0),
+#         "total_price": float(order.total_amount),
+#         "tracking_link": order.tracking_link,
+#         "tracking_number": order.tracking_number,
+#         "carrier": order.carrier,
+#         "shipment_id": order.shipment_id,
+#         "items": items
+#     }
+
+#     return JsonResponse(data)
+
+
 @require_http_methods(["GET"])
 @admin_access(StoreManagerOrSuperAdmin)
 def order_detail_api(request, id):
+
     order = get_object_or_404(
         Order.objects.select_related("user")
         .prefetch_related(
             "items__product__supplier",
             "items__size",
             "items__frame",
-            "items__material"
+            "items__material",
+            "items__product_size",
+            "items__product_size__color",
         ),
         id=id
     )
@@ -3259,21 +4840,67 @@ def order_detail_api(request, id):
     items = []
 
     for item in order.items.all():
+
+        product_size = getattr(item, "product_size", None)
+
+        color = (
+            product_size.color
+            if product_size and product_size.color_id
+            else None
+        )
+
+        # Prefer colour-specific image
+        product_image = None
+
+        if color and color.image:
+            product_image = color.image.url
+
+        elif item.product and item.product.image:
+            product_image = item.product.image.url
+
         items.append({
-            "product_name": item.product.name if item.product else None,
+            "product_name": (
+                item.product.name if item.product else None
+            ),
+
             "quantity": item.quantity,
             "price": float(item.price),
             "total": float(item.quantity * item.price),
 
+            # Fine Art selection
             "size": item.size.size if item.size else None,
             "frame": item.frame.name if item.frame else None,
             "material": item.material.name if item.material else None,
 
+            # New size-pricing selection
+            "product_size_id": (
+                product_size.id if product_size else None
+            ),
+            "product_size": (
+                product_size.size if product_size else None
+            ),
+            "color_id": color.id if color else None,
+            "color_name": color.color_name if color else None,
+
+            "product_image": product_image,
+
             "supplier": {
-                "id": item.product.supplier.id if item.product and item.product.supplier else None,
-                "name": item.product.supplier.name if item.product and item.product.supplier else None,
-                "email": item.product.supplier.email if item.product and item.product.supplier else None,
-                "phone": item.product.supplier.phone if item.product and item.product.supplier else None,
+                "id": (
+                    item.product.supplier.id
+                    if item.product and item.product.supplier else None
+                ),
+                "name": (
+                    item.product.supplier.name
+                    if item.product and item.product.supplier else None
+                ),
+                "email": (
+                    item.product.supplier.email
+                    if item.product and item.product.supplier else None
+                ),
+                "phone": (
+                    item.product.supplier.phone
+                    if item.product and item.product.supplier else None
+                ),
             }
         })
 
@@ -3294,40 +4921,6 @@ def order_detail_api(request, id):
     }
 
     return JsonResponse(data)
-
-# @require_http_methods(["GET"])
-# def order_detail_api(request, id):
-#     order = get_object_or_404(
-#         Order.objects.select_related('user')
-#         .prefetch_related('items__product', 'items__size', 'items__frame', 'items__material'),
-#         id=id
-#     )
-
-#     items = []
-#     for item in order.items.all():
-#         items.append({
-#             "product_name": item.product.name if item.product else None,
-#             "quantity": item.quantity,
-#             "price": float(item.price),
-#             "total": float(item.get_total_amount()),
-
-#             "size": item.size.name if item.size else None,
-#             "frame": item.frame.name if item.frame else None,
-#             "material": item.material.name if item.material else None,
-#         })
-
-#     data = {
-#         "id": order.id,
-#         "customer": order.user.email if order.user else "Guest",
-#         "date": order.created_at,
-#         "status": order.status,
-#         # "total_price": float(order.total_amount),
-#         "total": float(item.quantity * item.price),
-#         "tracking_url": order.tracking_link,
-#         "items": items
-#     }
-
-#     return JsonResponse(data)
 
     
 @csrf_exempt
