@@ -1014,14 +1014,10 @@ import cloudinary.uploader
 @admin_access(StoreManagerOrSuperAdmin)
 def update_product(request, product_id):
 
-    # --------------------------------------------------
-    # HELPERS
-    # --------------------------------------------------
-
     def parse_json_field(field_name, default=None):
         raw = request.POST.get(field_name)
 
-        if raw is None or raw == "":
+        if raw is None:
             return default
 
         try:
@@ -1080,20 +1076,89 @@ def update_product(request, product_id):
 
         return item
 
+    def normalize_ids(ids, field_name):
+        validate_list(ids, field_name)
+
+        result = set()
+
+        for item in ids:
+            if not str(item).isdigit():
+                raise ValueError(f"Invalid ID in {field_name}.")
+
+            item = int(item)
+
+            if item in result:
+                raise ValueError(f"Duplicate ID in {field_name}.")
+
+            result.add(item)
+
+        return result
+
     def schedule_cloudinary_delete(public_id):
         if public_id:
             transaction.on_commit(
-                lambda: cloudinary.uploader.destroy(public_id)
+                lambda pid=public_id: cloudinary.uploader.destroy(pid)
             )
 
-    # --------------------------------------------------
-    # PRODUCT UPDATE
-    # --------------------------------------------------
+    def delete_cloudinary_file(image_field):
+        if image_field:
+            schedule_cloudinary_delete(image_field.public_id)
+
+    def sync_image_records(
+        queryset,
+        keep_ids,
+        new_files,
+        create_callback
+    ):
+        """
+        Keep explicitly retained images.
+        Delete only removed images.
+        Add newly uploaded images.
+        """
+
+        existing_images = list(queryset)
+        existing_ids = {item.id for item in existing_images}
+
+        invalid_ids = keep_ids - existing_ids
+
+        if invalid_ids:
+            raise ValueError(
+                f"One or more image IDs do not belong to this record: "
+                f"{sorted(invalid_ids)}"
+            )
+
+        for old_image in existing_images:
+
+            if old_image.id not in keep_ids:
+                delete_cloudinary_file(old_image.image)
+                old_image.delete()
+
+        # Normalize order of retained images.
+        retained = list(
+            queryset.filter(id__in=keep_ids).order_by("order", "id")
+        )
+
+        for index, image_obj in enumerate(retained):
+            if image_obj.order != index:
+                image_obj.order = index
+                image_obj.save(update_fields=["order"])
+
+        # Append newly uploaded images.
+        start_order = len(retained)
+
+        for index, uploaded_file in enumerate(new_files):
+            create_callback(
+                uploaded_file,
+                start_order + index
+            )
 
     try:
 
-        # Lock product during update
         with transaction.atomic():
+
+            # --------------------------------------------------
+            # GET PRODUCT
+            # --------------------------------------------------
 
             try:
                 product = Product.objects.select_for_update().get(
@@ -1106,7 +1171,7 @@ def update_product(request, product_id):
                 )
 
             # --------------------------------------------------
-            # READ REQUEST DATA
+            # BASIC FIELDS
             # --------------------------------------------------
 
             name = request.POST.get("name")
@@ -1115,11 +1180,10 @@ def update_product(request, product_id):
             brand_id = request.POST.get("brand")
             supplier_id = request.POST.get("supplier")
 
-            price = request.POST.get("price")
-            supplier_cost = request.POST.get("supplier_cost")
+            price_raw = request.POST.get("price")
+            supplier_cost_raw = request.POST.get("supplier_cost")
             description = request.POST.get("description")
             specification_raw = request.POST.get("specification")
-
             stock_raw = request.POST.get("stock")
 
             weight_raw = request.POST.get("weight")
@@ -1127,45 +1191,28 @@ def update_product(request, product_id):
             width_raw = request.POST.get("width")
             height_raw = request.POST.get("height")
 
-            # --------------------------------------------------
-            # VALIDATE BASIC FIELDS
-            # --------------------------------------------------
-
             if name is not None:
                 name = name.strip()
 
                 if not name:
-                    return JsonResponse(
-                        {"error": "Product name cannot be empty."},
-                        status=400
-                    )
+                    raise ValueError("Product name cannot be empty.")
 
-            if price is not None:
-                price = parse_decimal(price, "price")
+            price = parse_decimal(price_raw, "price")
+            supplier_cost = parse_decimal(
+                supplier_cost_raw,
+                "supplier_cost"
+            )
 
-                if price < 0:
-                    return JsonResponse(
-                        {"error": "Price cannot be negative."},
-                        status=400
-                    )
+            if price is not None and price < 0:
+                raise ValueError("Price cannot be negative.")
 
-            if supplier_cost is not None:
-                supplier_cost = (
-                    None if supplier_cost == ""
-                    else parse_decimal(
-                        supplier_cost,
-                        "supplier_cost"
-                    )
-                )
+            if supplier_cost is not None and supplier_cost < 0:
+                raise ValueError("Supplier cost cannot be negative.")
 
-                if supplier_cost is not None and supplier_cost < 0:
-                    return JsonResponse(
-                        {"error": "Supplier cost cannot be negative."},
-                        status=400
-                    )
-
-            if stock_raw is not None:
-                stock = parse_integer(stock_raw, "stock")
+            stock = (
+                parse_integer(stock_raw, "stock")
+                if stock_raw is not None else None
+            )
 
             weight = parse_decimal(weight_raw, "weight")
             length = parse_decimal(length_raw, "length")
@@ -1176,33 +1223,32 @@ def update_product(request, product_id):
                 ("weight", weight),
                 ("length", length),
                 ("width", width),
-                ("height", height),
+                ("height", height)
             ]:
                 if value is not None and value < 0:
-                    return JsonResponse(
-                        {"error": f"{field_name} cannot be negative."},
-                        status=400
+                    raise ValueError(
+                        f"{field_name} cannot be negative."
                     )
 
             # --------------------------------------------------
-            # VALIDATE CATEGORY
+            # CATEGORY
             # --------------------------------------------------
 
             category = product.category
 
-            if category_id:
+            if category_id is not None:
+                if category_id == "":
+                    raise ValueError("Category is required.")
+
                 category = Category.objects.filter(
                     id=category_id
                 ).first()
 
                 if not category:
-                    return JsonResponse(
-                        {"error": "Invalid category."},
-                        status=400
-                    )
+                    raise ValueError("Invalid category.")
 
             # --------------------------------------------------
-            # VALIDATE SUBCATEGORY
+            # SUBCATEGORY
             # --------------------------------------------------
 
             subcategory = product.subcategory
@@ -1218,30 +1264,29 @@ def update_product(request, product_id):
                     ).first()
 
                     if not subcategory:
-                        return JsonResponse(
-                            {"error": "Invalid subcategory."},
-                            status=400
-                        )
+                        raise ValueError("Invalid subcategory.")
 
             # --------------------------------------------------
-            # VALIDATE BRAND
+            # BRAND
             # --------------------------------------------------
 
             brand = product.brand
 
-            if brand_id:
-                brand = Brand.objects.filter(
-                    id=brand_id
-                ).first()
+            if brand_id is not None:
 
-                if not brand:
-                    return JsonResponse(
-                        {"error": "Invalid brand."},
-                        status=400
-                    )
+                if brand_id == "":
+                    brand = None
+
+                else:
+                    brand = Brand.objects.filter(
+                        id=brand_id
+                    ).first()
+
+                    if not brand:
+                        raise ValueError("Invalid brand.")
 
             # --------------------------------------------------
-            # VALIDATE SUPPLIER
+            # SUPPLIER
             # --------------------------------------------------
 
             supplier = product.supplier
@@ -1257,10 +1302,7 @@ def update_product(request, product_id):
                     ).first()
 
                     if not supplier:
-                        return JsonResponse(
-                            {"error": "Invalid supplier."},
-                            status=400
-                        )
+                        raise ValueError("Invalid supplier.")
 
             # --------------------------------------------------
             # SPECIFICATION
@@ -1272,67 +1314,46 @@ def update_product(request, product_id):
 
                 try:
                     specification = json.loads(specification_raw)
-
                 except (json.JSONDecodeError, TypeError):
-                    return JsonResponse(
-                        {"error": "Invalid specification format."},
-                        status=400
+                    raise ValueError(
+                        "Invalid specification format."
                     )
 
                 if not isinstance(specification, (dict, list)):
-                    return JsonResponse(
-                        {
-                            "error": (
-                                "Specification must be a JSON object "
-                                "or list."
-                            )
-                        },
-                        status=400
+                    raise ValueError(
+                        "Specification must be a JSON object or list."
                     )
 
             # --------------------------------------------------
             # FLAGS
             # --------------------------------------------------
 
-            is_featured = product.is_featured
-            is_best_seller = product.is_best_seller
-            is_published = product.is_published
+            flags = {}
 
-            if request.POST.get("is_featured") is not None:
-                is_featured = parse_boolean(
-                    request.POST.get("is_featured"),
-                    "is_featured"
-                )
+            for field_name in [
+                "is_featured",
+                "is_best_seller",
+                "is_published"
+            ]:
+                raw = request.POST.get(field_name)
 
-            if request.POST.get("is_best_seller") is not None:
-                is_best_seller = parse_boolean(
-                    request.POST.get("is_best_seller"),
-                    "is_best_seller"
-                )
-
-            if request.POST.get("is_published") is not None:
-                is_published = parse_boolean(
-                    request.POST.get("is_published"),
-                    "is_published"
+                flags[field_name] = (
+                    parse_boolean(raw, field_name)
+                    if raw is not None
+                    else getattr(product, field_name)
                 )
 
             # --------------------------------------------------
             # PRODUCT TYPE
             # --------------------------------------------------
 
-            # Existing product type is preserved.
-            # This endpoint does not convert product types.
-
             product_type = product.product_type
 
             if product_type not in ("fine_art", "variant"):
-                return JsonResponse(
-                    {"error": "Invalid existing product type."},
-                    status=400
-                )
+                raise ValueError("Invalid existing product type.")
 
             # --------------------------------------------------
-            # FINE ART VALIDATION
+            # FINE ART DATA VALIDATION
             # --------------------------------------------------
 
             sizes = None
@@ -1343,11 +1364,8 @@ def update_product(request, product_id):
             if product_type == "fine_art":
 
                 sizes = parse_json_field("sizes")
-
                 colors = parse_json_field("colors")
-
                 frame_ids = parse_json_field("frame_ids")
-
                 material_ids = parse_json_field("material_ids")
 
                 if sizes is not None:
@@ -1355,19 +1373,11 @@ def update_product(request, product_id):
                     validate_list(sizes, "sizes")
 
                     for item in sizes:
-
                         validate_object(item, "sizes")
 
-                        size_name = item.get("size")
-
-                        if not size_name:
-                            return JsonResponse(
-                                {
-                                    "error": (
-                                        "Each size must have a size name."
-                                    )
-                                },
-                                status=400
+                        if not item.get("size"):
+                            raise ValueError(
+                                "Each size must have a size name."
                             )
 
                         size_price = parse_decimal(
@@ -1376,80 +1386,46 @@ def update_product(request, product_id):
                         )
 
                         if size_price is None or size_price < 0:
-                            return JsonResponse(
-                                {
-                                    "error": (
-                                        "Each size must have a "
-                                        "valid price."
-                                    )
-                                },
-                                status=400
+                            raise ValueError(
+                                "Each size must have a valid price."
                             )
 
                 if colors is not None:
 
                     validate_list(colors, "colors")
 
-                    for color in colors:
+                    for item in colors:
+                        validate_object(item, "colors")
 
-                        validate_object(color, "colors")
-
-                        if not color.get("color_name"):
-                            return JsonResponse(
-                                {
-                                    "error": (
-                                        "Each color must have a name."
-                                    )
-                                },
-                                status=400
+                        if not item.get("color_name"):
+                            raise ValueError(
+                                "Each color must have a name."
                             )
 
                 if frame_ids is not None:
 
-                    validate_list(frame_ids, "frame_ids")
-
-                    if not all(
-                        str(item).isdigit()
-                        for item in frame_ids
-                    ):
-                        return JsonResponse(
-                            {"error": "Invalid frame IDs."},
-                            status=400
-                        )
+                    frame_ids = normalize_ids(
+                        frame_ids,
+                        "frame_ids"
+                    )
 
                     if Frame.objects.filter(
                         id__in=frame_ids
-                    ).count() != len(set(frame_ids)):
-
-                        return JsonResponse(
-                            {"error": "One or more frames are invalid."},
-                            status=400
-                        )
+                    ).count() != len(frame_ids):
+                        raise ValueError("One or more frames are invalid.")
 
                 if material_ids is not None:
 
-                    validate_list(material_ids, "material_ids")
-
-                    if not all(
-                        str(item).isdigit()
-                        for item in material_ids
-                    ):
-                        return JsonResponse(
-                            {"error": "Invalid material IDs."},
-                            status=400
-                        )
+                    material_ids = normalize_ids(
+                        material_ids,
+                        "material_ids"
+                    )
 
                     if Material.objects.filter(
                         id__in=material_ids
-                    ).count() != len(set(material_ids)):
-
-                        return JsonResponse(
-                            {
-                                "error": (
-                                    "One or more materials are invalid."
-                                )
-                            },
-                            status=400
+                    ).count() != len(material_ids):
+                        raise ValueError(
+                            "One or more materials are invalid."
                         )
 
             # --------------------------------------------------
@@ -1463,30 +1439,17 @@ def update_product(request, product_id):
                 variants_raw = request.POST.get("variants")
 
                 if variants_raw is None:
-                    return JsonResponse(
-                        {
-                            "error": (
-                                "Variants are required for "
-                                "variant products."
-                            )
-                        },
-                        status=400
+                    raise ValueError(
+                        "Variants are required for variant products."
                     )
 
                 variants = parse_json_field("variants")
 
                 validate_list(variants, "variants")
 
-                # Prevent accidental deletion of all variants
-                if len(variants) == 0:
-                    return JsonResponse(
-                        {
-                            "error": (
-                                "At least one variant is required. "
-                                "Existing variants were not changed."
-                            )
-                        },
-                        status=400
+                if not variants:
+                    raise ValueError(
+                        "At least one variant is required."
                     )
 
                 received_ids = set()
@@ -1500,35 +1463,23 @@ def update_product(request, product_id):
                     sku = str(variant.get("sku", "")).strip()
 
                     if not sku:
-                        return JsonResponse(
-                            {
-                                "error": (
-                                    "Each variant must have a SKU."
-                                )
-                            },
-                            status=400
+                        raise ValueError(
+                            "Each variant must have a SKU."
                         )
 
                     if sku in received_skus:
-                        return JsonResponse(
-                            {
-                                "error": (
-                                    f"Duplicate SKU '{sku}' "
-                                    "in request."
-                                )
-                            },
-                            status=400
+                        raise ValueError(
+                            f"Duplicate SKU '{sku}' in request."
                         )
 
                     received_skus.add(sku)
 
-                    variant_stock = parse_integer(
+                    parse_integer(
                         variant.get("stock", 0),
                         "variant stock"
                     )
 
                     options = variant.get("options", [])
-
                     validate_list(options, "variant options")
 
                     for option in options:
@@ -1536,81 +1487,46 @@ def update_product(request, product_id):
                         validate_object(option, "variant options")
 
                         if not option.get("option_name"):
-                            return JsonResponse(
-                                {
-                                    "error": (
-                                        "Variant option name "
-                                        "is required."
-                                    )
-                                },
-                                status=400
+                            raise ValueError(
+                                "Variant option name is required."
                             )
 
                         if not option.get("option_value"):
-                            return JsonResponse(
-                                {
-                                    "error": (
-                                        "Variant option value "
-                                        "is required."
-                                    )
-                                },
-                                status=400
+                            raise ValueError(
+                                "Variant option value is required."
                             )
 
                     if variant_id:
 
                         if not str(variant_id).isdigit():
-                            return JsonResponse(
-                                {"error": "Invalid variant ID."},
-                                status=400
+                            raise ValueError("Invalid variant ID.")
+
+                        variant_id = int(variant_id)
+
+                        if variant_id in received_ids:
+                            raise ValueError(
+                                "Duplicate variant ID in request."
                             )
 
-                        if int(variant_id) in received_ids:
-                            return JsonResponse(
-                                {
-                                    "error": (
-                                        "Duplicate variant ID "
-                                        "in request."
-                                    )
-                                },
-                                status=400
-                            )
-
-                        received_ids.add(int(variant_id))
+                        received_ids.add(variant_id)
 
                         if not ProductVariant.objects.filter(
                             id=variant_id,
                             product=product
                         ).exists():
-
-                            return JsonResponse(
-                                {
-                                    "error": (
-                                        f"Variant {variant_id} "
-                                        "does not belong to this product."
-                                    )
-                                },
-                                status=400
+                            raise ValueError(
+                                f"Variant {variant_id} does not belong "
+                                "to this product."
                             )
 
-                    # SKU uniqueness
-                    sku_query = ProductVariant.objects.filter(
-                        sku=sku
-                    )
+                    sku_query = ProductVariant.objects.filter(sku=sku)
 
                     if variant_id:
-                        sku_query = sku_query.exclude(
-                            id=variant_id
-                        )
+                        sku_query = sku_query.exclude(id=variant_id)
 
                     if sku_query.exists():
-                        return JsonResponse(
-                            {
-                                "error": (
-                                    f"SKU '{sku}' already exists."
-                                )
-                            },
-                            status=400
+                        raise ValueError(
+                            f"SKU '{sku}' already exists."
                         )
 
             # --------------------------------------------------
@@ -1634,42 +1550,45 @@ def update_product(request, product_id):
             if specification_raw is not None:
                 product.specification = specification
 
-            if supplier_cost is not None:
+            if supplier_cost_raw is not None:
                 product.supplier_cost = supplier_cost
 
-            product.is_featured = is_featured
-            product.is_best_seller = is_best_seller
-            product.is_published = is_published
+            for field_name, value in flags.items():
+                setattr(product, field_name, value)
 
-            if weight is not None:
-                product.weight = weight
+            for field_name, value in [
+                ("weight", weight),
+                ("length", length),
+                ("width", width),
+                ("height", height)
+            ]:
+                if value is not None:
+                    setattr(product, field_name, value)
 
-            if length is not None:
-                product.length = length
-
-            if width is not None:
-                product.width = width
-
-            if height is not None:
-                product.height = height
-
-            if stock_raw is not None and product_type == "fine_art":
+            if stock is not None and product_type == "fine_art":
                 product.stock = stock
 
             # --------------------------------------------------
             # MAIN IMAGE
             # --------------------------------------------------
 
-            image = request.FILES.get("image")
-
             old_main_image_id = None
 
-            if image:
+            main_image = request.FILES.get("image")
+
+            if main_image:
 
                 if product.image:
                     old_main_image_id = product.image.public_id
 
-                product.image = image
+                product.image = main_image
+
+            elif request.POST.get("remove_main_image") == "true":
+
+                if product.image:
+                    old_main_image_id = product.image.public_id
+
+                product.image = None
 
             product.save()
 
@@ -1680,71 +1599,188 @@ def update_product(request, product_id):
             if product_type == "fine_art":
 
                 # FRAMES
+
                 if frame_ids is not None:
                     product.frames.set(frame_ids)
 
                 # MATERIALS
+
                 if material_ids is not None:
                     product.materials.set(material_ids)
 
-                # SIZES
+                # SIZES: ID-BASED SYNCHRONIZATION
+
                 if sizes is not None:
 
-                    product.sizes.all().delete()
+                    existing_sizes = {
+                        item.id: item
+                        for item in product.sizes.all()
+                    }
+
+                    received_size_ids = set()
 
                     for item in sizes:
 
-                        FineArtSize.objects.create(
-                            product=product,
-                            size=item["size"],
-                            price=parse_decimal(
+                        size_id = item.get("id")
+
+                        if size_id:
+
+                            if not str(size_id).isdigit():
+                                raise ValueError("Invalid size ID.")
+
+                            size_id = int(size_id)
+
+                            if size_id not in existing_sizes:
+                                raise ValueError(
+                                    f"Size {size_id} does not belong "
+                                    "to this product."
+                                )
+
+                            size_obj = existing_sizes[size_id]
+
+                            size_obj.size = item["size"]
+                            size_obj.price = parse_decimal(
                                 item["price"],
                                 "size price"
                             )
-                        )
+                            size_obj.save()
 
-                # COLORS
+                            received_size_ids.add(size_id)
+
+                        else:
+
+                            new_size = FineArtSize.objects.create(
+                                product=product,
+                                size=item["size"],
+                                price=parse_decimal(
+                                    item["price"],
+                                    "size price"
+                                )
+                            )
+
+                            received_size_ids.add(new_size.id)
+
+                    # Delete only sizes omitted from the submitted list.
+
+                    for size_id, size_obj in existing_sizes.items():
+
+                        if size_id not in received_size_ids:
+                            size_obj.delete()
+
+                # COLORS: ID-BASED SYNCHRONIZATION
+
                 if colors is not None:
 
-                    product.colors.all().delete()
+                    existing_colors = {
+                        item.id: item
+                        for item in product.colors.all()
+                    }
 
-                    for index, color in enumerate(colors):
+                    received_color_ids = set()
+
+                    for index, item in enumerate(colors):
+
+                        color_id = item.get("id")
 
                         color_image = request.FILES.get(
                             f"color_image_{index}"
                         )
 
-                        ProductColor.objects.create(
-                            product=product,
-                            color_name=color["color_name"],
-                            image=color_image
-                        )
+                        if color_id:
 
-                # GALLERY
-                gallery_images = request.FILES.getlist("images")
+                            if not str(color_id).isdigit():
+                                raise ValueError("Invalid color ID.")
 
-                if gallery_images:
+                            color_id = int(color_id)
 
-                    old_gallery = list(
-                        product.gallery.all()
-                    )
+                            if color_id not in existing_colors:
+                                raise ValueError(
+                                    f"Color {color_id} does not belong "
+                                    "to this product."
+                                )
 
-                    for old_image in old_gallery:
+                            color_obj = existing_colors[color_id]
 
-                        if old_image.image:
-                            schedule_cloudinary_delete(
-                                old_image.image.public_id
+                            color_obj.color_name = item["color_name"]
+
+                            if color_image:
+
+                                if color_obj.image:
+                                    delete_cloudinary_file(
+                                        color_obj.image
+                                    )
+
+                                color_obj.image = color_image
+
+                            elif item.get("remove_image") is True:
+
+                                if color_obj.image:
+                                    delete_cloudinary_file(
+                                        color_obj.image
+                                    )
+
+                                color_obj.image = None
+
+                            color_obj.save()
+
+                            received_color_ids.add(color_id)
+
+                        else:
+
+                            color_obj = ProductColor.objects.create(
+                                product=product,
+                                color_name=item["color_name"],
+                                image=color_image
                             )
 
-                    product.gallery.all().delete()
+                            received_color_ids.add(color_obj.id)
 
-                    for order, img in enumerate(gallery_images):
+                    # Delete removed colors and their images.
 
-                        ProductImage.objects.create(
+                    for color_id, color_obj in existing_colors.items():
+
+                        if color_id not in received_color_ids:
+
+                            delete_cloudinary_file(color_obj.image)
+                            color_obj.delete()
+
+                # GALLERY IMAGES
+
+                gallery_ids_raw = request.POST.get(
+                    "existing_gallery_image_ids"
+                )
+
+                new_gallery_images = request.FILES.getlist("images")
+
+                if gallery_ids_raw is not None or new_gallery_images:
+
+                    gallery_ids = (
+                        parse_json_field(
+                            "existing_gallery_image_ids",
+                            []
+                        )
+                        if gallery_ids_raw is not None
+                        else {
+                            item.id
+                            for item in product.gallery.all()
+                        }
+                    )
+
+                    gallery_ids = normalize_ids(
+                        gallery_ids,
+                        "existing_gallery_image_ids"
+                    )
+
+                    sync_image_records(
+                        product.gallery.all(),
+                        gallery_ids,
+                        new_gallery_images,
+                        lambda img, order: ProductImage.objects.create(
                             product=product,
                             image=img,
                             order=order
                         )
+                    )
 
             # --------------------------------------------------
             # VARIANT UPDATE
@@ -1752,12 +1788,10 @@ def update_product(request, product_id):
 
             elif product_type == "variant":
 
-                existing_variant_ids = set(
-                    product.variants.values_list(
-                        "id",
-                        flat=True
-                    )
-                )
+                existing_variants = {
+                    item.id: item
+                    for item in product.variants.all()
+                }
 
                 received_variant_ids = set()
 
@@ -1765,9 +1799,7 @@ def update_product(request, product_id):
 
                     variant_id = variant.get("id")
 
-                    sku = str(
-                        variant.get("sku", "")
-                    ).strip()
+                    sku = str(variant.get("sku", "")).strip()
 
                     variant_stock = parse_integer(
                         variant.get("stock", 0),
@@ -1776,42 +1808,33 @@ def update_product(request, product_id):
 
                     options = variant.get("options", [])
 
-                    # UPDATE EXISTING
+                    # UPDATE OR CREATE VARIANT
+
                     if variant_id:
 
-                        product_variant = (
-                            ProductVariant.objects.get(
-                                id=variant_id,
-                                product=product
-                            )
-                        )
-
-                        received_variant_ids.add(
-                            product_variant.id
-                        )
+                        product_variant = existing_variants[
+                            int(variant_id)
+                        ]
 
                         product_variant.sku = sku
-
                         product_variant.stock = variant_stock
-
                         product_variant.save()
 
-                    # CREATE NEW
                     else:
 
-                        product_variant = (
-                            ProductVariant.objects.create(
-                                product=product,
-                                sku=sku,
-                                stock=variant_stock
-                            )
+                        product_variant = ProductVariant.objects.create(
+                            product=product,
+                            sku=sku,
+                            stock=variant_stock
                         )
 
-                        received_variant_ids.add(
-                            product_variant.id
-                        )
+                    received_variant_ids.add(product_variant.id)
 
                     # UPDATE OPTIONS
+
+                    # Preserve existing behavior: options are synchronized
+                    # as a complete submitted list.
+
                     product_variant.options.all().delete()
 
                     for option in options:
@@ -1822,68 +1845,67 @@ def update_product(request, product_id):
                             option_value=option["option_value"]
                         )
 
-                    # UPDATE VARIANT IMAGES
-                    variant_images = request.FILES.getlist(
+                    # --------------------------------------------------
+                    # VARIANT IMAGES: ID-BASED SYNCHRONIZATION
+                    # --------------------------------------------------
+
+                    existing_image_ids_raw = variant.get(
+                        "existing_image_ids"
+                    )
+
+                    if existing_image_ids_raw is None:
+
+                        # Backward compatibility:
+                        # If the frontend does not send image IDs,
+                        # retain all existing images.
+
+                        keep_image_ids = {
+                            image_obj.id
+                            for image_obj in product_variant.images.all()
+                        }
+
+                    else:
+
+                        keep_image_ids = normalize_ids(
+                            existing_image_ids_raw,
+                            "existing_image_ids"
+                        )
+
+                    new_variant_images = request.FILES.getlist(
                         f"variant_images_{index}"
                     )
 
-                    if variant_images:
-
-                        old_images = list(
-                            product_variant.images.all()
-                        )
-
-                        for old_image in old_images:
-
-                            if old_image.image:
-                                schedule_cloudinary_delete(
-                                    old_image.image.public_id
-                                )
-
-                        product_variant.images.all().delete()
-
-                        for order, img in enumerate(
-                            variant_images
-                        ):
-
+                    sync_image_records(
+                        product_variant.images.all(),
+                        keep_image_ids,
+                        new_variant_images,
+                        lambda img, order, pv=product_variant:
                             ProductVariantImage.objects.create(
-                                variant=product_variant,
+                                variant=pv,
                                 image=img,
                                 order=order
                             )
+                    )
 
+                # --------------------------------------------------
                 # DELETE REMOVED VARIANTS
-                variants_to_delete = (
-                    existing_variant_ids -
-                    received_variant_ids
-                )
+                # --------------------------------------------------
 
-                removed_variants = ProductVariant.objects.filter(
-                    id__in=variants_to_delete,
-                    product=product
-                )
+                for variant_id, removed_variant in existing_variants.items():
 
-                for removed_variant in removed_variants:
+                    if variant_id not in received_variant_ids:
 
-                    for variant_image in (
-                        removed_variant.images.all()
-                    ):
+                        for image_obj in removed_variant.images.all():
+                            delete_cloudinary_file(image_obj.image)
 
-                        if variant_image.image:
-                            schedule_cloudinary_delete(
-                                variant_image.image.public_id
-                            )
-
-                    removed_variant.delete()
+                        removed_variant.delete()
 
             # --------------------------------------------------
-            # DELETE OLD MAIN IMAGE AFTER DB COMMIT
+            # DELETE OLD MAIN IMAGE AFTER COMMIT
             # --------------------------------------------------
 
             if old_main_image_id:
-                schedule_cloudinary_delete(
-                    old_main_image_id
-                )
+                schedule_cloudinary_delete(old_main_image_id)
 
             # --------------------------------------------------
             # SUCCESS RESPONSE
@@ -1903,10 +1925,6 @@ def update_product(request, product_id):
                 status=200
             )
 
-    # --------------------------------------------------
-    # VALIDATION ERRORS
-    # --------------------------------------------------
-
     except ValueError as e:
 
         return JsonResponse(
@@ -1921,7 +1939,7 @@ def update_product(request, product_id):
             status=400
         )
 
-    except Exception as e:
+    except Exception:
 
         import logging
 
@@ -1941,6 +1959,941 @@ def update_product(request, product_id):
             },
             status=500
         )
+
+
+
+# @csrf_exempt
+# @require_http_methods(["POST"])
+# @admin_access(StoreManagerOrSuperAdmin)
+# def update_product(request, product_id):
+
+#     # --------------------------------------------------
+#     # HELPERS
+#     # --------------------------------------------------
+
+#     def parse_json_field(field_name, default=None):
+#         raw = request.POST.get(field_name)
+
+#         if raw is None or raw == "":
+#             return default
+
+#         try:
+#             return json.loads(raw)
+#         except (json.JSONDecodeError, TypeError):
+#             raise ValueError(f"Invalid {field_name} format.")
+
+#     def parse_decimal(value, field_name):
+#         if value is None or value == "":
+#             return None
+
+#         try:
+#             result = Decimal(str(value))
+#         except (InvalidOperation, TypeError, ValueError):
+#             raise ValueError(f"Invalid {field_name}.")
+
+#         if not result.is_finite():
+#             raise ValueError(f"Invalid {field_name}.")
+
+#         return result
+
+#     def parse_integer(value, field_name):
+#         try:
+#             result = int(value)
+#         except (TypeError, ValueError):
+#             raise ValueError(f"Invalid {field_name}.")
+
+#         if result < 0:
+#             raise ValueError(f"{field_name} cannot be negative.")
+
+#         return result
+
+#     def parse_boolean(value, field_name):
+#         if isinstance(value, bool):
+#             return value
+
+#         value = str(value).lower()
+
+#         if value in ("true", "1", "yes"):
+#             return True
+
+#         if value in ("false", "0", "no"):
+#             return False
+
+#         raise ValueError(f"Invalid {field_name}.")
+
+#     def validate_list(data, field_name):
+#         if not isinstance(data, list):
+#             raise ValueError(f"{field_name} must be a list.")
+
+#         return data
+
+#     def validate_object(item, field_name):
+#         if not isinstance(item, dict):
+#             raise ValueError(f"Invalid item in {field_name}.")
+
+#         return item
+
+#     def schedule_cloudinary_delete(public_id):
+#         if public_id:
+#             transaction.on_commit(
+#                 lambda: cloudinary.uploader.destroy(public_id)
+#             )
+
+#     # --------------------------------------------------
+#     # PRODUCT UPDATE
+#     # --------------------------------------------------
+
+#     try:
+
+#         # Lock product during update
+#         with transaction.atomic():
+
+#             try:
+#                 product = Product.objects.select_for_update().get(
+#                     id=product_id
+#                 )
+#             except Product.DoesNotExist:
+#                 return JsonResponse(
+#                     {"error": "Product not found."},
+#                     status=404
+#                 )
+
+#             # --------------------------------------------------
+#             # READ REQUEST DATA
+#             # --------------------------------------------------
+
+#             name = request.POST.get("name")
+#             category_id = request.POST.get("category")
+#             subcategory_id = request.POST.get("subcategory")
+#             brand_id = request.POST.get("brand")
+#             supplier_id = request.POST.get("supplier")
+
+#             price = request.POST.get("price")
+#             supplier_cost = request.POST.get("supplier_cost")
+#             description = request.POST.get("description")
+#             specification_raw = request.POST.get("specification")
+
+#             stock_raw = request.POST.get("stock")
+
+#             weight_raw = request.POST.get("weight")
+#             length_raw = request.POST.get("length")
+#             width_raw = request.POST.get("width")
+#             height_raw = request.POST.get("height")
+
+#             # --------------------------------------------------
+#             # VALIDATE BASIC FIELDS
+#             # --------------------------------------------------
+
+#             if name is not None:
+#                 name = name.strip()
+
+#                 if not name:
+#                     return JsonResponse(
+#                         {"error": "Product name cannot be empty."},
+#                         status=400
+#                     )
+
+#             if price is not None:
+#                 price = parse_decimal(price, "price")
+
+#                 if price < 0:
+#                     return JsonResponse(
+#                         {"error": "Price cannot be negative."},
+#                         status=400
+#                     )
+
+#             if supplier_cost is not None:
+#                 supplier_cost = (
+#                     None if supplier_cost == ""
+#                     else parse_decimal(
+#                         supplier_cost,
+#                         "supplier_cost"
+#                     )
+#                 )
+
+#                 if supplier_cost is not None and supplier_cost < 0:
+#                     return JsonResponse(
+#                         {"error": "Supplier cost cannot be negative."},
+#                         status=400
+#                     )
+
+#             if stock_raw is not None:
+#                 stock = parse_integer(stock_raw, "stock")
+
+#             weight = parse_decimal(weight_raw, "weight")
+#             length = parse_decimal(length_raw, "length")
+#             width = parse_decimal(width_raw, "width")
+#             height = parse_decimal(height_raw, "height")
+
+#             for field_name, value in [
+#                 ("weight", weight),
+#                 ("length", length),
+#                 ("width", width),
+#                 ("height", height),
+#             ]:
+#                 if value is not None and value < 0:
+#                     return JsonResponse(
+#                         {"error": f"{field_name} cannot be negative."},
+#                         status=400
+#                     )
+
+#             # --------------------------------------------------
+#             # VALIDATE CATEGORY
+#             # --------------------------------------------------
+
+#             category = product.category
+
+#             if category_id:
+#                 category = Category.objects.filter(
+#                     id=category_id
+#                 ).first()
+
+#                 if not category:
+#                     return JsonResponse(
+#                         {"error": "Invalid category."},
+#                         status=400
+#                     )
+
+#             # --------------------------------------------------
+#             # VALIDATE SUBCATEGORY
+#             # --------------------------------------------------
+
+#             subcategory = product.subcategory
+
+#             if subcategory_id is not None:
+
+#                 if subcategory_id == "":
+#                     subcategory = None
+
+#                 else:
+#                     subcategory = SubCategory.objects.filter(
+#                         id=subcategory_id
+#                     ).first()
+
+#                     if not subcategory:
+#                         return JsonResponse(
+#                             {"error": "Invalid subcategory."},
+#                             status=400
+#                         )
+
+#             # --------------------------------------------------
+#             # VALIDATE BRAND
+#             # --------------------------------------------------
+
+#             brand = product.brand
+
+#             if brand_id:
+#                 brand = Brand.objects.filter(
+#                     id=brand_id
+#                 ).first()
+
+#                 if not brand:
+#                     return JsonResponse(
+#                         {"error": "Invalid brand."},
+#                         status=400
+#                     )
+
+#             # --------------------------------------------------
+#             # VALIDATE SUPPLIER
+#             # --------------------------------------------------
+
+#             supplier = product.supplier
+
+#             if supplier_id is not None:
+
+#                 if supplier_id == "":
+#                     supplier = None
+
+#                 else:
+#                     supplier = Supplier.objects.filter(
+#                         id=supplier_id
+#                     ).first()
+
+#                     if not supplier:
+#                         return JsonResponse(
+#                             {"error": "Invalid supplier."},
+#                             status=400
+#                         )
+
+#             # --------------------------------------------------
+#             # SPECIFICATION
+#             # --------------------------------------------------
+
+#             specification = product.specification
+
+#             if specification_raw is not None:
+
+#                 try:
+#                     specification = json.loads(specification_raw)
+
+#                 except (json.JSONDecodeError, TypeError):
+#                     return JsonResponse(
+#                         {"error": "Invalid specification format."},
+#                         status=400
+#                     )
+
+#                 if not isinstance(specification, (dict, list)):
+#                     return JsonResponse(
+#                         {
+#                             "error": (
+#                                 "Specification must be a JSON object "
+#                                 "or list."
+#                             )
+#                         },
+#                         status=400
+#                     )
+
+#             # --------------------------------------------------
+#             # FLAGS
+#             # --------------------------------------------------
+
+#             is_featured = product.is_featured
+#             is_best_seller = product.is_best_seller
+#             is_published = product.is_published
+
+#             if request.POST.get("is_featured") is not None:
+#                 is_featured = parse_boolean(
+#                     request.POST.get("is_featured"),
+#                     "is_featured"
+#                 )
+
+#             if request.POST.get("is_best_seller") is not None:
+#                 is_best_seller = parse_boolean(
+#                     request.POST.get("is_best_seller"),
+#                     "is_best_seller"
+#                 )
+
+#             if request.POST.get("is_published") is not None:
+#                 is_published = parse_boolean(
+#                     request.POST.get("is_published"),
+#                     "is_published"
+#                 )
+
+#             # --------------------------------------------------
+#             # PRODUCT TYPE
+#             # --------------------------------------------------
+
+#             # Existing product type is preserved.
+#             # This endpoint does not convert product types.
+
+#             product_type = product.product_type
+
+#             if product_type not in ("fine_art", "variant"):
+#                 return JsonResponse(
+#                     {"error": "Invalid existing product type."},
+#                     status=400
+#                 )
+
+#             # --------------------------------------------------
+#             # FINE ART VALIDATION
+#             # --------------------------------------------------
+
+#             sizes = None
+#             colors = None
+#             frame_ids = None
+#             material_ids = None
+
+#             if product_type == "fine_art":
+
+#                 sizes = parse_json_field("sizes")
+
+#                 colors = parse_json_field("colors")
+
+#                 frame_ids = parse_json_field("frame_ids")
+
+#                 material_ids = parse_json_field("material_ids")
+
+#                 if sizes is not None:
+
+#                     validate_list(sizes, "sizes")
+
+#                     for item in sizes:
+
+#                         validate_object(item, "sizes")
+
+#                         size_name = item.get("size")
+
+#                         if not size_name:
+#                             return JsonResponse(
+#                                 {
+#                                     "error": (
+#                                         "Each size must have a size name."
+#                                     )
+#                                 },
+#                                 status=400
+#                             )
+
+#                         size_price = parse_decimal(
+#                             item.get("price"),
+#                             "size price"
+#                         )
+
+#                         if size_price is None or size_price < 0:
+#                             return JsonResponse(
+#                                 {
+#                                     "error": (
+#                                         "Each size must have a "
+#                                         "valid price."
+#                                     )
+#                                 },
+#                                 status=400
+#                             )
+
+#                 if colors is not None:
+
+#                     validate_list(colors, "colors")
+
+#                     for color in colors:
+
+#                         validate_object(color, "colors")
+
+#                         if not color.get("color_name"):
+#                             return JsonResponse(
+#                                 {
+#                                     "error": (
+#                                         "Each color must have a name."
+#                                     )
+#                                 },
+#                                 status=400
+#                             )
+
+#                 if frame_ids is not None:
+
+#                     validate_list(frame_ids, "frame_ids")
+
+#                     if not all(
+#                         str(item).isdigit()
+#                         for item in frame_ids
+#                     ):
+#                         return JsonResponse(
+#                             {"error": "Invalid frame IDs."},
+#                             status=400
+#                         )
+
+#                     if Frame.objects.filter(
+#                         id__in=frame_ids
+#                     ).count() != len(set(frame_ids)):
+
+#                         return JsonResponse(
+#                             {"error": "One or more frames are invalid."},
+#                             status=400
+#                         )
+
+#                 if material_ids is not None:
+
+#                     validate_list(material_ids, "material_ids")
+
+#                     if not all(
+#                         str(item).isdigit()
+#                         for item in material_ids
+#                     ):
+#                         return JsonResponse(
+#                             {"error": "Invalid material IDs."},
+#                             status=400
+#                         )
+
+#                     if Material.objects.filter(
+#                         id__in=material_ids
+#                     ).count() != len(set(material_ids)):
+
+#                         return JsonResponse(
+#                             {
+#                                 "error": (
+#                                     "One or more materials are invalid."
+#                                 )
+#                             },
+#                             status=400
+#                         )
+
+#             # --------------------------------------------------
+#             # VARIANT VALIDATION
+#             # --------------------------------------------------
+
+#             variants = None
+
+#             if product_type == "variant":
+
+#                 variants_raw = request.POST.get("variants")
+
+#                 if variants_raw is None:
+#                     return JsonResponse(
+#                         {
+#                             "error": (
+#                                 "Variants are required for "
+#                                 "variant products."
+#                             )
+#                         },
+#                         status=400
+#                     )
+
+#                 variants = parse_json_field("variants")
+
+#                 validate_list(variants, "variants")
+
+#                 # Prevent accidental deletion of all variants
+#                 if len(variants) == 0:
+#                     return JsonResponse(
+#                         {
+#                             "error": (
+#                                 "At least one variant is required. "
+#                                 "Existing variants were not changed."
+#                             )
+#                         },
+#                         status=400
+#                     )
+
+#                 received_ids = set()
+#                 received_skus = set()
+
+#                 for variant in variants:
+
+#                     validate_object(variant, "variants")
+
+#                     variant_id = variant.get("id")
+#                     sku = str(variant.get("sku", "")).strip()
+
+#                     if not sku:
+#                         return JsonResponse(
+#                             {
+#                                 "error": (
+#                                     "Each variant must have a SKU."
+#                                 )
+#                             },
+#                             status=400
+#                         )
+
+#                     if sku in received_skus:
+#                         return JsonResponse(
+#                             {
+#                                 "error": (
+#                                     f"Duplicate SKU '{sku}' "
+#                                     "in request."
+#                                 )
+#                             },
+#                             status=400
+#                         )
+
+#                     received_skus.add(sku)
+
+#                     variant_stock = parse_integer(
+#                         variant.get("stock", 0),
+#                         "variant stock"
+#                     )
+
+#                     options = variant.get("options", [])
+
+#                     validate_list(options, "variant options")
+
+#                     for option in options:
+
+#                         validate_object(option, "variant options")
+
+#                         if not option.get("option_name"):
+#                             return JsonResponse(
+#                                 {
+#                                     "error": (
+#                                         "Variant option name "
+#                                         "is required."
+#                                     )
+#                                 },
+#                                 status=400
+#                             )
+
+#                         if not option.get("option_value"):
+#                             return JsonResponse(
+#                                 {
+#                                     "error": (
+#                                         "Variant option value "
+#                                         "is required."
+#                                     )
+#                                 },
+#                                 status=400
+#                             )
+
+#                     if variant_id:
+
+#                         if not str(variant_id).isdigit():
+#                             return JsonResponse(
+#                                 {"error": "Invalid variant ID."},
+#                                 status=400
+#                             )
+
+#                         if int(variant_id) in received_ids:
+#                             return JsonResponse(
+#                                 {
+#                                     "error": (
+#                                         "Duplicate variant ID "
+#                                         "in request."
+#                                     )
+#                                 },
+#                                 status=400
+#                             )
+
+#                         received_ids.add(int(variant_id))
+
+#                         if not ProductVariant.objects.filter(
+#                             id=variant_id,
+#                             product=product
+#                         ).exists():
+
+#                             return JsonResponse(
+#                                 {
+#                                     "error": (
+#                                         f"Variant {variant_id} "
+#                                         "does not belong to this product."
+#                                     )
+#                                 },
+#                                 status=400
+#                             )
+
+#                     # SKU uniqueness
+#                     sku_query = ProductVariant.objects.filter(
+#                         sku=sku
+#                     )
+
+#                     if variant_id:
+#                         sku_query = sku_query.exclude(
+#                             id=variant_id
+#                         )
+
+#                     if sku_query.exists():
+#                         return JsonResponse(
+#                             {
+#                                 "error": (
+#                                     f"SKU '{sku}' already exists."
+#                                 )
+#                             },
+#                             status=400
+#                         )
+
+#             # --------------------------------------------------
+#             # UPDATE PRODUCT FIELDS
+#             # --------------------------------------------------
+
+#             if name is not None:
+#                 product.name = name
+
+#             product.category = category
+#             product.subcategory = subcategory
+#             product.brand = brand
+#             product.supplier = supplier
+
+#             if price is not None:
+#                 product.price = price
+
+#             if description is not None:
+#                 product.description = description
+
+#             if specification_raw is not None:
+#                 product.specification = specification
+
+#             if supplier_cost is not None:
+#                 product.supplier_cost = supplier_cost
+
+#             product.is_featured = is_featured
+#             product.is_best_seller = is_best_seller
+#             product.is_published = is_published
+
+#             if weight is not None:
+#                 product.weight = weight
+
+#             if length is not None:
+#                 product.length = length
+
+#             if width is not None:
+#                 product.width = width
+
+#             if height is not None:
+#                 product.height = height
+
+#             if stock_raw is not None and product_type == "fine_art":
+#                 product.stock = stock
+
+#             # --------------------------------------------------
+#             # MAIN IMAGE
+#             # --------------------------------------------------
+
+#             image = request.FILES.get("image")
+
+#             old_main_image_id = None
+
+#             if image:
+
+#                 if product.image:
+#                     old_main_image_id = product.image.public_id
+
+#                 product.image = image
+
+#             product.save()
+
+#             # --------------------------------------------------
+#             # FINE ART UPDATE
+#             # --------------------------------------------------
+
+#             if product_type == "fine_art":
+
+#                 # FRAMES
+#                 if frame_ids is not None:
+#                     product.frames.set(frame_ids)
+
+#                 # MATERIALS
+#                 if material_ids is not None:
+#                     product.materials.set(material_ids)
+
+#                 # SIZES
+#                 if sizes is not None:
+
+#                     product.sizes.all().delete()
+
+#                     for item in sizes:
+
+#                         FineArtSize.objects.create(
+#                             product=product,
+#                             size=item["size"],
+#                             price=parse_decimal(
+#                                 item["price"],
+#                                 "size price"
+#                             )
+#                         )
+
+#                 # COLORS
+#                 if colors is not None:
+
+#                     product.colors.all().delete()
+
+#                     for index, color in enumerate(colors):
+
+#                         color_image = request.FILES.get(
+#                             f"color_image_{index}"
+#                         )
+
+#                         ProductColor.objects.create(
+#                             product=product,
+#                             color_name=color["color_name"],
+#                             image=color_image
+#                         )
+
+#                 # GALLERY
+#                 gallery_images = request.FILES.getlist("images")
+
+#                 if gallery_images:
+
+#                     old_gallery = list(
+#                         product.gallery.all()
+#                     )
+
+#                     for old_image in old_gallery:
+
+#                         if old_image.image:
+#                             schedule_cloudinary_delete(
+#                                 old_image.image.public_id
+#                             )
+
+#                     product.gallery.all().delete()
+
+#                     for order, img in enumerate(gallery_images):
+
+#                         ProductImage.objects.create(
+#                             product=product,
+#                             image=img,
+#                             order=order
+#                         )
+
+#             # --------------------------------------------------
+#             # VARIANT UPDATE
+#             # --------------------------------------------------
+
+#             elif product_type == "variant":
+
+#                 existing_variant_ids = set(
+#                     product.variants.values_list(
+#                         "id",
+#                         flat=True
+#                     )
+#                 )
+
+#                 received_variant_ids = set()
+
+#                 for index, variant in enumerate(variants):
+
+#                     variant_id = variant.get("id")
+
+#                     sku = str(
+#                         variant.get("sku", "")
+#                     ).strip()
+
+#                     variant_stock = parse_integer(
+#                         variant.get("stock", 0),
+#                         "variant stock"
+#                     )
+
+#                     options = variant.get("options", [])
+
+#                     # UPDATE EXISTING
+#                     if variant_id:
+
+#                         product_variant = (
+#                             ProductVariant.objects.get(
+#                                 id=variant_id,
+#                                 product=product
+#                             )
+#                         )
+
+#                         received_variant_ids.add(
+#                             product_variant.id
+#                         )
+
+#                         product_variant.sku = sku
+
+#                         product_variant.stock = variant_stock
+
+#                         product_variant.save()
+
+#                     # CREATE NEW
+#                     else:
+
+#                         product_variant = (
+#                             ProductVariant.objects.create(
+#                                 product=product,
+#                                 sku=sku,
+#                                 stock=variant_stock
+#                             )
+#                         )
+
+#                         received_variant_ids.add(
+#                             product_variant.id
+#                         )
+
+#                     # UPDATE OPTIONS
+#                     product_variant.options.all().delete()
+
+#                     for option in options:
+
+#                         ProductVariantOption.objects.create(
+#                             variant=product_variant,
+#                             option_name=option["option_name"],
+#                             option_value=option["option_value"]
+#                         )
+
+#                     # UPDATE VARIANT IMAGES
+#                     variant_images = request.FILES.getlist(
+#                         f"variant_images_{index}"
+#                     )
+
+#                     if variant_images:
+
+#                         old_images = list(
+#                             product_variant.images.all()
+#                         )
+
+#                         for old_image in old_images:
+
+#                             if old_image.image:
+#                                 schedule_cloudinary_delete(
+#                                     old_image.image.public_id
+#                                 )
+
+#                         product_variant.images.all().delete()
+
+#                         for order, img in enumerate(
+#                             variant_images
+#                         ):
+
+#                             ProductVariantImage.objects.create(
+#                                 variant=product_variant,
+#                                 image=img,
+#                                 order=order
+#                             )
+
+#                 # DELETE REMOVED VARIANTS
+#                 variants_to_delete = (
+#                     existing_variant_ids -
+#                     received_variant_ids
+#                 )
+
+#                 removed_variants = ProductVariant.objects.filter(
+#                     id__in=variants_to_delete,
+#                     product=product
+#                 )
+
+#                 for removed_variant in removed_variants:
+
+#                     for variant_image in (
+#                         removed_variant.images.all()
+#                     ):
+
+#                         if variant_image.image:
+#                             schedule_cloudinary_delete(
+#                                 variant_image.image.public_id
+#                             )
+
+#                     removed_variant.delete()
+
+#             # --------------------------------------------------
+#             # DELETE OLD MAIN IMAGE AFTER DB COMMIT
+#             # --------------------------------------------------
+
+#             if old_main_image_id:
+#                 schedule_cloudinary_delete(
+#                     old_main_image_id
+#                 )
+
+#             # --------------------------------------------------
+#             # SUCCESS RESPONSE
+#             # --------------------------------------------------
+
+#             return JsonResponse(
+#                 {
+#                     "message": "Product updated successfully.",
+#                     "id": product.id,
+#                     "product_type": product.product_type,
+#                     "supplier": {
+#                         "id": product.supplier.id,
+#                         "name": product.supplier.name
+#                     } if product.supplier else None,
+#                     "specification": product.specification
+#                 },
+#                 status=200
+#             )
+
+#     # --------------------------------------------------
+#     # VALIDATION ERRORS
+#     # --------------------------------------------------
+
+#     except ValueError as e:
+
+#         return JsonResponse(
+#             {"error": str(e)},
+#             status=400
+#         )
+
+#     except (InvalidOperation, TypeError, OverflowError):
+
+#         return JsonResponse(
+#             {"error": "Invalid data provided."},
+#             status=400
+#         )
+
+#     except Exception as e:
+
+#         import logging
+
+#         logger = logging.getLogger(__name__)
+
+#         logger.exception(
+#             "Product update failed for product %s",
+#             product_id
+#         )
+
+#         return JsonResponse(
+#             {
+#                 "error": (
+#                     "Product update failed. "
+#                     "Please check the server logs."
+#                 )
+#             },
+#             status=500
+#         )
 
 
 @csrf_exempt

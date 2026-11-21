@@ -1,6 +1,8 @@
 from django.db import models
 from django.contrib.auth.models import User
 from cloudinary.models import CloudinaryField
+from django.core.exceptions import ValidationError
+from django.db.models import Q
 
 
 # Create your models here.
@@ -97,15 +99,11 @@ class Product(models.Model):
     materials = models.ManyToManyField(Material, blank=True, related_name="products")
     supplier = models.ForeignKey(Supplier,on_delete=models.SET_NULL,null=True,blank=True,related_name="products")
     supplier_cost = models.DecimalField(max_digits=10,decimal_places=2,null=True,blank=True)
-    is_published = models.BooleanField(default=True)
-    
-    
-    
+    is_published = models.BooleanField(default=True)  
     weight = models.DecimalField(max_digits=8,decimal_places=2,default=0.50,help_text="Weight in kilograms")
     length = models.DecimalField(max_digits=8,decimal_places=2,default=10.00,help_text="Length in centimeters")
     width = models.DecimalField(max_digits=8,decimal_places=2,default=10.00,help_text="Width in centimeters")
     height = models.DecimalField(max_digits=8,decimal_places=2,default=10.00,help_text="Height in centimeters")
-
     product_type = models.CharField(max_length=20,choices=PRODUCT_TYPE_CHOICES,default="variant")
 
     def __str__(self):
@@ -118,6 +116,23 @@ class ProductColor(models.Model):
 
     def __str__(self):
         return f"{self.product.name} - {self.color_name}"
+
+
+class ProductColorImage(models.Model):
+    color = models.ForeignKey(
+        ProductColor,
+        on_delete=models.CASCADE,
+        related_name="gallery"
+    )
+    image = CloudinaryField("color_image")
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order"]
+
+    def __str__(self):
+        return f"{self.color.color_name} image"
+    
 
 class FineArtSize(models.Model):
     product = models.ForeignKey(
@@ -132,20 +147,85 @@ class FineArtSize(models.Model):
 
 
 
+
 class ProductSize(models.Model):
     product = models.ForeignKey(
         Product,
         on_delete=models.CASCADE,
         related_name="product_sizes"
     )
+
+    color = models.ForeignKey(
+        ProductColor,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="sizes"
+    )
+
     size = models.CharField(max_length=50)
+
     price = models.DecimalField(
         max_digits=10,
         decimal_places=2
     )
+
     stock = models.PositiveIntegerField(default=0)
 
+    supplier_cost = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True
+    )
+
+    class Meta:
+        constraints = [
+            # Same product + same colour + same size
+            # cannot be duplicated.
+            models.UniqueConstraint(
+                fields=["product", "color", "size"],
+                name="unique_product_color_size"
+            ),
+
+            # For products without colours:
+            # same product + same size cannot be duplicated.
+            models.UniqueConstraint(
+                fields=["product", "size"],
+                condition=Q(color__isnull=True),
+                name="unique_product_size_without_color"
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+
+        # Ensure the selected colour belongs to this product.
+        if self.color_id and self.product_id:
+            if self.color.product_id != self.product_id:
+                raise ValidationError({
+                    "color": "This colour does not belong to the selected product."
+                })
+
+    def save(self, *args, **kwargs):
+        # Validate product-colour relationship before saving.
+        self.clean()
+        super().save(*args, **kwargs)
+
+    @property
+    def effective_supplier_cost(self):
+        if self.supplier_cost is not None:
+            return self.supplier_cost
+
+        return self.product.supplier_cost
+
     def __str__(self):
+        if self.color:
+            return (
+                f"{self.product.name} - "
+                f"{self.color.color_name} - {self.size}"
+            )
+
         return f"{self.product.name} - {self.size}"
 
 
@@ -256,6 +336,25 @@ class OrderItem(models.Model):
     variant = models.ForeignKey(ProductVariant,on_delete=models.SET_NULL,null=True,blank=True,related_name="order_items")
     product_size = models.ForeignKey(ProductSize,on_delete=models.SET_NULL,null=True,blank=True,related_name="order_items")
 
+
+    supplier_cost_snapshot = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True
+    )
+
+    selected_color_snapshot = models.CharField(
+        max_length=100,
+        blank=True,
+        default=""
+    )
+
+    selected_size_snapshot = models.CharField(
+        max_length=100,
+        blank=True,
+        default=""
+    )
     def get_total_price(self):
         return self.quantity * self.price
     

@@ -3,9 +3,16 @@ from django.db import models
 # Create your models here.
 from django.db import models
 from django.contrib.auth.models import User
-from ChronasAdmin.models import FineArtSize, Frame, Material, Product, Order, ProductVariant
+from ChronasAdmin.models import (
+    FineArtSize,
+    Frame,
+    Material,
+    Product,
+    Order,
+    ProductVariant,
+    ProductSize,
+)
 import uuid
-from ChronasAdmin.models import ProductSize
 
 class GuestSession(models.Model):
     guest_id = models.CharField(max_length=100, unique=True, default=uuid.uuid4)
