@@ -2236,9 +2236,11 @@ from django.db import transaction
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-
 import cloudinary.uploader
 
+@csrf_exempt
+@require_http_methods(["POST"])
+@admin_access(StoreManagerOrSuperAdmin)
 def update_product(request, product_id):
 
     def parse_json_field(field_name, default=None):
