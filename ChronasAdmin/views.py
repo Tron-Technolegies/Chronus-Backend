@@ -2238,6 +2238,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 import cloudinary.uploader
 
+
 @csrf_exempt
 @require_http_methods(["POST"])
 @admin_access(StoreManagerOrSuperAdmin)
@@ -2661,7 +2662,32 @@ def update_product(request, product_id):
             # SIZE-PRICING VALIDATION
             # --------------------------------------------------
 
-            has_size_pricing = bool(getattr(product, "has_size_pricing", False))
+            stored_has_size_pricing = bool(
+                getattr(product, "has_size_pricing", False)
+            )
+
+            convert_to_variants = parse_boolean(
+                request.POST.get("convert_to_variants", "false"),
+                "convert_to_variants"
+            )
+
+            if convert_to_variants:
+                if product_type != "variant":
+                    raise ValueError(
+                        "Only variant products can be converted."
+                    )
+
+                if not stored_has_size_pricing:
+                    raise ValueError(
+                        "This product is already using the new variant structure."
+                    )
+
+            # During an explicit conversion, validate and process the
+            # submitted variants instead of the legacy ProductSize data.
+            has_size_pricing = (
+                stored_has_size_pricing and not convert_to_variants
+            )
+
             size_pricing_sizes = None
             size_pricing_colors = None
 
@@ -2686,46 +2712,85 @@ def update_product(request, product_id):
                         raise ValueError("Size supplier cost cannot be negative.")
                     return size_name, size_price, size_stock, size_cost
 
-                if size_pricing_colors is not None:
-                    validate_list(size_pricing_colors, "colors")
-                    seen_colors = set()
-                    for color_item in size_pricing_colors:
-                        validate_object(color_item, "colors")
-                        color_name = str(color_item.get("color_name", "")).strip()
-                        if not color_name:
-                            raise ValueError("Each color must have a name.")
-                        color_key = color_name.casefold()
-                        if color_key in seen_colors:
-                            raise ValueError(f"Duplicate color '{color_name}'.")
-                        seen_colors.add(color_key)
 
-                        color_sizes = color_item.get("sizes")
-                        if color_sizes is None:
-                            raise ValueError(f"Sizes are required for color '{color_name}'.")
-                        validate_list(color_sizes, f"sizes for {color_name}")
-                        seen_sizes = set()
-                        for size_item in color_sizes:
-                            size_name, _, _, _ = validate_product_size_entry(
-                                size_item, f"sizes for {color_name}"
-                            )
-                            size_key = size_name.casefold()
-                            if size_key in seen_sizes:
-                                raise ValueError(
-                                    f"Duplicate size '{size_name}' for color '{color_name}'."
-                                )
-                            seen_sizes.add(size_key)
+            
+            if size_pricing_colors:
+                validate_list(size_pricing_colors, "colors")
+                seen_colors = set()
 
-                elif size_pricing_sizes is not None:
-                    validate_list(size_pricing_sizes, "sizes")
-                    if not size_pricing_sizes:
-                        raise ValueError("At least one size is required.")
+                for color_item in size_pricing_colors:
+                    validate_object(color_item, "colors")
+
+                    color_name = str(
+                        color_item.get("color_name", "")
+                    ).strip()
+
+                    if not color_name:
+                        raise ValueError("Each color must have a name.")
+
+                    color_key = color_name.casefold()
+
+                    if color_key in seen_colors:
+                        raise ValueError(
+                            f"Duplicate color '{color_name}'."
+                        )
+
+                    seen_colors.add(color_key)
+
+                    color_sizes = color_item.get("sizes")
+
+                    if color_sizes is None:
+                        raise ValueError(
+                            f"Sizes are required for color '{color_name}'."
+                        )
+
+                    validate_list(
+                        color_sizes,
+                        f"sizes for {color_name}"
+                    )
+
+                    if not color_sizes:
+                        raise ValueError(
+                            f"At least one size is required for color '{color_name}'."
+                        )
+
                     seen_sizes = set()
-                    for size_item in size_pricing_sizes:
-                        size_name, _, _, _ = validate_product_size_entry(size_item)
+
+                    for size_item in color_sizes:
+                        size_name, _, _, _ = validate_product_size_entry(
+                            size_item
+                        )
+
                         size_key = size_name.casefold()
+
                         if size_key in seen_sizes:
-                            raise ValueError(f"Duplicate size '{size_name}'.")
+                            raise ValueError(
+                                f"Duplicate size '{size_name}' for color '{color_name}'."
+                            )
+
                         seen_sizes.add(size_key)
+
+            elif size_pricing_sizes is not None:
+                validate_list(size_pricing_sizes, "sizes")
+
+                if not size_pricing_sizes:
+                    raise ValueError("At least one size is required.")
+
+                seen_sizes = set()
+
+                for size_item in size_pricing_sizes:
+                    size_name, _, _, _ = validate_product_size_entry(
+                        size_item
+                    )
+
+                    size_key = size_name.casefold()
+
+                    if size_key in seen_sizes:
+                        raise ValueError(
+                            f"Duplicate size '{size_name}'."
+                        )
+
+                    seen_sizes.add(size_key)
 
             # --------------------------------------------------
             # VARIANT VALIDATION
@@ -2866,6 +2931,9 @@ def update_product(request, product_id):
 
             if stock is not None and product_type == "fine_art":
                 product.stock = stock
+
+            if convert_to_variants:
+                product.has_size_pricing = False
 
             # --------------------------------------------------
             # MAIN IMAGE
@@ -3147,45 +3215,53 @@ def update_product(request, product_id):
                             # OrderItem.product_size uses SET_NULL and snapshots retain history.
                             old_obj.delete()
 
-                if size_pricing_colors is not None:
-                    # This product is in colour + size mode. A submitted empty list
-                    # is rejected to prevent accidental deletion of every colour.
-                    if not size_pricing_colors:
-                        raise ValueError("At least one color is required for a color-based size product.")
-
-                    # Do not silently change between size-only and color-based modes.
+                if size_pricing_colors:
+                    # Color + size mode.
+                    # Do not silently convert a size-only product to color mode.
                     if product.product_sizes.filter(color__isnull=True).exists():
-                        raise ValueError("This product currently has size-only pricing. Convert its pricing mode explicitly before editing colors.")
+                        raise ValueError(
+                            "This product currently has size-only pricing. "
+                            "Convert its pricing mode explicitly before editing colors."
+                        )
 
-                    existing_colors = {obj.id: obj for obj in product.colors.all()}
+                    existing_colors = {
+                        obj.id: obj for obj in product.colors.all()
+                    }
                     received_color_ids = set()
-                    seen_color_names = set()
 
                     for index, color_item in enumerate(size_pricing_colors):
-                        color_name = str(color_item.get("color_name", "")).strip()
-                        name_key = color_name.casefold()
-                        if name_key in seen_color_names:
-                            raise ValueError(f"Duplicate color '{color_name}'.")
-                        seen_color_names.add(name_key)
+                        color_name = str(
+                            color_item.get("color_name", "")
+                        ).strip()
 
                         color_id = color_item.get("id")
-                        color_image = request.FILES.get(f"color_image_{index}")
+                        color_image = request.FILES.get(
+                            f"color_image_{index}"
+                        )
 
                         if color_id not in (None, ""):
                             if not str(color_id).isdigit():
                                 raise ValueError("Invalid color ID.")
+
                             color_id = int(color_id)
+
                             if color_id not in existing_colors:
-                                raise ValueError(f"Color {color_id} does not belong to this product.")
+                                raise ValueError(
+                                    f"Color {color_id} does not belong to this product."
+                                )
+
                             color_obj = existing_colors[color_id]
                             color_obj.color_name = color_name
+
                             if color_image:
                                 delete_cloudinary_file(color_obj.image)
                                 color_obj.image = color_image
                             elif color_item.get("remove_image") is True:
                                 delete_cloudinary_file(color_obj.image)
                                 color_obj.image = None
+
                             color_obj.save()
+
                         else:
                             color_obj = ProductColor.objects.create(
                                 product=product,
@@ -3194,51 +3270,105 @@ def update_product(request, product_id):
                             )
 
                         received_color_ids.add(color_obj.id)
-                        sync_size_rows(color_item["sizes"], color_obj=color_obj)
 
-                        # Per-colour gallery: omitted IDs mean retain existing images.
-                        gallery_ids_raw = color_item.get("existing_gallery_image_ids")
+                        sync_size_rows(
+                            color_item["sizes"],
+                            color_obj=color_obj
+                        )
+
+                        # If gallery IDs are omitted, retain existing images.
+                        gallery_ids_raw = color_item.get(
+                            "existing_gallery_image_ids"
+                        )
+
                         if gallery_ids_raw is None:
-                            keep_gallery_ids = {img.id for img in color_obj.gallery.all()}
+                            keep_gallery_ids = {
+                                img.id for img in color_obj.gallery.all()
+                            }
                         else:
                             keep_gallery_ids = normalize_ids(
-                                gallery_ids_raw, "existing_gallery_image_ids"
+                                gallery_ids_raw,
+                                "existing_gallery_image_ids"
                             )
-                        new_color_images = request.FILES.getlist(f"color_images_{index}")
+
+                        new_color_images = request.FILES.getlist(
+                            f"color_images_{index}"
+                        )
+
                         sync_image_records(
                             color_obj.gallery.all(),
                             keep_gallery_ids,
                             new_color_images,
-                            lambda img, order, c=color_obj: ProductColorImage.objects.create(
-                                color=c, image=img, order=order
-                            ),
+                            lambda img, order, c=color_obj:
+                                ProductColorImage.objects.create(
+                                    color=c,
+                                    image=img,
+                                    order=order
+                                ),
                         )
 
+                    # Remove colors omitted from the submitted list.
                     for old_color_id, old_color in existing_colors.items():
                         if old_color_id not in received_color_ids:
                             old_sizes = list(old_color.sizes.all())
+
                             for old_size in old_sizes:
                                 ensure_size_not_in_cart(old_size)
+
                             for gallery_image in old_color.gallery.all():
                                 delete_cloudinary_file(gallery_image.image)
+
                             delete_cloudinary_file(old_color.image)
-                            # ProductSize.color is PROTECT, so remove its sizes first.
+
+                            # ProductSize.color may use PROTECT; delete sizes first.
                             old_color.sizes.all().delete()
                             old_color.delete()
 
                 elif size_pricing_sizes is not None:
-                    # Size-only mode must not silently erase existing colour data.
-                    if product.colors.exists() or product.product_sizes.filter(color__isnull=False).exists():
-                        raise ValueError("This product currently has color-based pricing. Submit the colors payload to update it.")
-                    sync_size_rows(size_pricing_sizes, color_obj=None)
+                    # Size-only mode. An empty colors=[] payload is expected
+                    # from the frontend and must not trigger color-mode validation.
+                    if not size_pricing_sizes:
+                        raise ValueError("At least one size is required.")
 
-                # No sizes/colors payload means the size-pricing data remains unchanged.
+                    # Do not silently erase existing color-based data.
+                    if (
+                        product.colors.exists()
+                        or product.product_sizes.filter(
+                            color__isnull=False
+                        ).exists()
+                    ):
+                        raise ValueError(
+                            "This product currently has color-based pricing. "
+                            "Submit the colors payload to update it."
+                        )
+
+                    sync_size_rows(
+                        size_pricing_sizes,
+                        color_obj=None
+                    )
+
+                # If both sizes and colors are omitted, leave pricing unchanged.
 
             # --------------------------------------------------
             # VARIANT UPDATE
             # --------------------------------------------------
 
             elif product_type == "variant":
+
+                # Before converting, do not invalidate any customer's
+                # active cart selection that still points to a legacy size.
+                if convert_to_variants:
+                    legacy_sizes = ProductSize.objects.filter(
+                        product=product
+                    )
+
+                    if CartItem.objects.filter(
+                        product_size__in=legacy_sizes
+                    ).exists():
+                        raise ValueError(
+                            "This product has sizes selected in customer carts. "
+                            "Clear or update those cart items before converting."
+                        )
 
                 existing_variants = {
                     item.id: item
@@ -3352,6 +3482,12 @@ def update_product(request, product_id):
 
                         removed_variant.delete()
 
+                # Remove legacy ProductSize rows only after the new variants
+                # have been validated and saved successfully. Keep ProductColor
+                # records and their images untouched for safety.
+                if convert_to_variants:
+                    ProductSize.objects.filter(product=product).delete()
+
             # --------------------------------------------------
             # DELETE OLD MAIN IMAGE AFTER COMMIT
             # --------------------------------------------------
@@ -3368,6 +3504,8 @@ def update_product(request, product_id):
                     "message": "Product updated successfully.",
                     "id": product.id,
                     "product_type": product.product_type,
+                    "has_size_pricing": product.has_size_pricing,
+                    "converted_to_variants": convert_to_variants,
                     "supplier": {
                         "id": product.supplier.id,
                         "name": product.supplier.name
