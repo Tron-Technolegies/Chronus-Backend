@@ -2239,6 +2239,7 @@ from django.views.decorators.http import require_http_methods
 import cloudinary.uploader
 
 
+
 @csrf_exempt
 @require_http_methods(["POST"])
 @admin_access(StoreManagerOrSuperAdmin)
@@ -2433,8 +2434,8 @@ def update_product(request, product_id):
                 "supplier_cost"
             )
 
-            if price is not None and price < 0:
-                raise ValueError("Price cannot be negative.")
+            if price is not None and price <= 0:
+                raise ValueError("Price must be greater than zero.")
 
             if supplier_cost is not None and supplier_cost < 0:
                 raise ValueError("Supplier cost cannot be negative.")
@@ -2549,9 +2550,9 @@ def update_product(request, product_id):
                         "Invalid specification format."
                     )
 
-                if not isinstance(specification, (dict, list)):
+                if not isinstance(specification, dict):
                     raise ValueError(
-                        "Specification must be a JSON object or list."
+                        "Specification must be an object."
                     )
 
             # --------------------------------------------------
@@ -2602,35 +2603,65 @@ def update_product(request, product_id):
 
                     validate_list(sizes, "sizes")
 
+                    seen_sizes = set()
+
                     for item in sizes:
+
                         validate_object(item, "sizes")
 
-                        if not item.get("size"):
+                        size_name = str(item.get("size", "")).strip()
+
+                        if not size_name:
                             raise ValueError(
-                                "Each size must have a size name."
+                                "Each Fine Art size must have a size name."
                             )
+
+                        size_key = size_name.casefold()
+
+                        if size_key in seen_sizes:
+                            raise ValueError(
+                                f"Duplicate Fine Art size: {size_name}"
+                            )
+
+                        seen_sizes.add(size_key)
 
                         size_price = parse_decimal(
                             item.get("price"),
                             "size price"
                         )
 
-                        if size_price is None or size_price < 0:
+                        if size_price is None or size_price <= 0:
                             raise ValueError(
-                                "Each size must have a valid price."
+                                "Invalid Fine Art size price."
                             )
 
                 if colors is not None:
 
                     validate_list(colors, "colors")
 
+                    seen_colors = set()
+
                     for item in colors:
+
                         validate_object(item, "colors")
 
-                        if not item.get("color_name"):
+                        color_name = str(
+                            item.get("color_name", "")
+                        ).strip()
+
+                        if not color_name:
                             raise ValueError(
-                                "Each color must have a name."
+                                "Each color must have a color name."
                             )
+
+                        color_key = color_name.casefold()
+
+                        if color_key in seen_colors:
+                            raise ValueError(
+                                f"Duplicate color: {color_name}"
+                            )
+
+                        seen_colors.add(color_key)
 
                 if frame_ids is not None:
 
@@ -3005,7 +3036,7 @@ def update_product(request, product_id):
 
                             size_obj = existing_sizes[size_id]
 
-                            size_obj.size = item["size"]
+                            size_obj.size = item["size"].strip()
                             size_obj.price = parse_decimal(
                                 item["price"],
                                 "size price"
@@ -3018,7 +3049,7 @@ def update_product(request, product_id):
 
                             new_size = FineArtSize.objects.create(
                                 product=product,
-                                size=item["size"],
+                                size=item["size"].strip(),
                                 price=parse_decimal(
                                     item["price"],
                                     "size price"
@@ -3068,7 +3099,7 @@ def update_product(request, product_id):
 
                             color_obj = existing_colors[color_id]
 
-                            color_obj.color_name = item["color_name"]
+                            color_obj.color_name = item["color_name"].strip()
 
                             if color_image:
 
@@ -3096,7 +3127,7 @@ def update_product(request, product_id):
 
                             color_obj = ProductColor.objects.create(
                                 product=product,
-                                color_name=item["color_name"],
+                                color_name=item["color_name"].strip(),
                                 image=color_image
                             )
 
@@ -3549,6 +3580,10 @@ def update_product(request, product_id):
             },
             status=500
         )
+
+
+
+
 
 
 
