@@ -3379,6 +3379,45 @@ def update_product(request, product_id):
                     )
 
                 # If both sizes and colors are omitted, leave pricing unchanged.
+                    # --------------------------------------------------
+                    # SIZE-ONLY PRODUCT GALLERY IMAGES
+                    # --------------------------------------------------
+
+                    gallery_ids_raw = request.POST.get(
+                        "existing_gallery_image_ids"
+                    )
+
+                    new_gallery_images = request.FILES.getlist("images")
+
+                    if gallery_ids_raw is not None or new_gallery_images:
+
+                        gallery_ids = (
+                            parse_json_field(
+                                "existing_gallery_image_ids",
+                                []
+                            )
+                            if gallery_ids_raw is not None
+                            else {
+                                item.id
+                                for item in product.gallery.all()
+                            }
+                        )
+
+                        gallery_ids = normalize_ids(
+                            gallery_ids,
+                            "existing_gallery_image_ids"
+                        )
+
+                        sync_image_records(
+                            product.gallery.all(),
+                            gallery_ids,
+                            new_gallery_images,
+                            lambda img, order: ProductImage.objects.create(
+                                product=product,
+                                image=img,
+                                order=order
+                            )
+                        )
 
             # --------------------------------------------------
             # VARIANT UPDATE
