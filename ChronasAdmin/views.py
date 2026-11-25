@@ -4720,6 +4720,7 @@ def update_product(request, product_id):
 @csrf_exempt
 @require_http_methods(["DELETE"])
 @admin_access(SuperAdminPermission)
+@admin_access(StoreManagerOrSuperAdmin)
 def delete_product(request, product_id):
     try:
         product = Product.objects.get(id=product_id)
@@ -5100,7 +5101,7 @@ def order_detail_api(request, id):
     
 @csrf_exempt
 @require_http_methods(["POST"])
-@admin_access(SuperAdminPermission)
+@admin_access(StoreManagerOrSuperAdmin)
 def add_coupon(request):
     try:
         data = json.loads(request.body)
@@ -5157,7 +5158,7 @@ def view_coupons(request):
 
 @csrf_exempt
 @require_http_methods(["PUT"])
-@admin_access(SuperAdminPermission)
+@admin_access(StoreManagerOrSuperAdmin)
 def update_coupon(request, coupon_id):
     try:
         coupon = Coupon.objects.get(id=coupon_id)
@@ -5182,10 +5183,11 @@ def update_coupon(request, coupon_id):
 
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON format"}, status=400)
+
     
 @csrf_exempt
 @require_http_methods(["DELETE"])
-@admin_access(SuperAdminPermission)
+@admin_access(StoreManagerOrSuperAdmin)
 def delete_coupon(request, coupon_id):
     try:
         coupon = Coupon.objects.get(id=coupon_id)
@@ -6059,7 +6061,7 @@ import json
 
 @require_http_methods(["POST"])
 @csrf_exempt
-@admin_access(SuperAdminPermission)
+@admin_access(StoreManagerOrSuperAdmin)
 def add_supplier(request):
     try:
         data = json.loads(request.body)
@@ -6143,7 +6145,7 @@ def supplier_detail(request, id):
 
 @require_http_methods(["PUT"])
 @csrf_exempt
-@admin_access(SuperAdminPermission)
+@admin_access(StoreManagerOrSuperAdmin)
 def update_supplier(request, id):
 
     try:
@@ -6203,7 +6205,7 @@ def update_supplier(request, id):
 
 @require_http_methods(["DELETE"])
 @csrf_exempt
-@admin_access(SuperAdminPermission)
+@admin_access(StoreManagerOrSuperAdmin)
 def delete_supplier(request, id):
 
     supplier = get_object_or_404(
@@ -6546,7 +6548,7 @@ from .models import ShippingPartner
 
 # CREATE
 @api_view(["POST"])
-@permission_classes([SuperAdminPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def create_shipping_partner(request):
 
     partner = ShippingPartner.objects.create(
@@ -6611,7 +6613,7 @@ def get_shipping_partner(request, id):
 
 # UPDATE
 @api_view(["PUT"])
-@permission_classes([SuperAdminPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def update_shipping_partner(request, id):
 
     partner = get_object_or_404(
@@ -6648,7 +6650,7 @@ def update_shipping_partner(request, id):
 
 # DELETE
 @api_view(["DELETE"])
-@permission_classes([SuperAdminPermission])
+@admin_access(StoreManagerOrSuperAdmin)
 def delete_shipping_partner(request, id):
 
     partner = get_object_or_404(

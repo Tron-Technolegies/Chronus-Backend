@@ -1825,13 +1825,7 @@ def login(request):
         "tokens": tokens
     })
 
-# Replace only the existing view_products() and view_single_product() functions.
-# Keep your existing imports. These functions use the existing convert_price,
-# convert_to_aed, Q, Avg, Count, Product, Review and related model imports.
 
-# Replace only the existing view_products() and view_single_product() functions.
-# Keep your existing imports. These functions use the existing convert_price,
-# convert_to_aed, Q, Avg, Count, Product, Review and related model imports.
 
 @csrf_exempt
 @require_http_methods(["GET"])
