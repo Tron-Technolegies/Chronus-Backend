@@ -713,6 +713,39 @@ def checkout(request):
             stock_updates.append((variant, item.quantity))
 
         # Fine Art / ordinary products: existing behaviour retained.
+        # Fine Art: stock belongs to the selected FineArtSize.
+        elif product.product_type == "fine_art":
+            if not item.size_id:
+                return Response(
+                    {"error": f"Size selection missing for {product.name}"},
+                    status=400
+                )
+
+            fine_art_size = FineArtSize.objects.select_for_update().filter(
+                id=item.size_id,
+                product=product
+            ).first()
+
+            if not fine_art_size:
+                return Response(
+                    {"error": f"Selected size no longer exists for {product.name}"},
+                    status=400
+                )
+
+            if fine_art_size.stock < item.quantity:
+                return Response(
+                    {
+                        "error": (
+                            f"Only {fine_art_size.stock} item(s) available "
+                            f"for {product.name} ({fine_art_size.size})"
+                        )
+                    },
+                    status=400
+                )
+
+            stock_updates.append((fine_art_size, item.quantity))
+
+        # Other non-variant products: preserve existing behaviour.
         else:
             locked_product = Product.objects.select_for_update().get(
                 id=item.product_id
@@ -730,6 +763,23 @@ def checkout(request):
                 )
 
             stock_updates.append((locked_product, item.quantity))
+        # else:
+        #     locked_product = Product.objects.select_for_update().get(
+        #         id=item.product_id
+        #     )
+
+        #     if locked_product.stock < item.quantity:
+        #         return Response(
+        #             {
+        #                 "error": (
+        #                     f"Only {locked_product.stock} item(s) available "
+        #                     f"for {product.name}"
+        #                 )
+        #             },
+        #             status=400
+        #         )
+
+        #     stock_updates.append((locked_product, item.quantity))
 
     # 6. Guest checkout
     guest_id = None
@@ -1673,7 +1723,7 @@ def my_orders(request):
 
 
 
-from .currency import convert_amount
+from .currency import convert_amount, convert_to_aed
 class CreatePaymentIntentView(APIView):
     permission_classes = [AllowAny]
 

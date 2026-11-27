@@ -1257,7 +1257,10 @@ def view_products(request):
 
     if low_stock and low_stock.lower() == "true":
         products = products.filter(
-            Q(product_type="fine_art", stock__lte=stock_threshold)
+                    Q(
+            product_type="fine_art",
+            sizes__stock__lte=stock_threshold
+        )
             | Q(product_type="variant", has_size_pricing=True,
                 product_sizes__stock__lte=stock_threshold)
             | Q(product_type="variant", has_size_pricing=False,
@@ -1312,7 +1315,7 @@ def view_products(request):
         # Preserve the existing Fine Art size response. Size-pricing products
         # expose ProductSize records separately to avoid mixing model types.
         fine_art_sizes = [
-            {"size": size.size, "price": str(size.price)}
+            {"id": size.id,"stock": size.stock,"size": size.size, "price": str(size.price)}
             for size in product.sizes.all()
         ]
 
@@ -1353,12 +1356,20 @@ def view_products(request):
         ]
 
         if product.product_type == "fine_art":
-            is_low_stock = product.stock <= stock_threshold
+            is_low_stock = any(
+                size.stock <= stock_threshold
+                for size in product.sizes.all()
+            )
         elif has_size_pricing:
-            is_low_stock = any(size.stock <= stock_threshold for size in product.product_sizes.all())
+            is_low_stock = any(
+                size.stock <= stock_threshold
+                for size in product.product_sizes.all()
+            )
         else:
-            is_low_stock = any(variant.stock <= stock_threshold for variant in product.variants.all())
-
+            is_low_stock = any(
+                variant.stock <= stock_threshold
+                for variant in product.variants.all()
+            )
         data.append({
             "id": product.id,
             "name": product.name,
@@ -1483,7 +1494,12 @@ def view_single_product(request, product_id):
             "height": str(product.height),
             # Existing Fine Art size records; kept unchanged.
             "sizes": [
-                {"id": size.id, "size": size.size, "price": str(size.price)}
+                {
+                    "id": size.id,
+                    "size": size.size,
+                    "price": str(size.price),
+                    "stock": size.stock,
+                }
                 for size in product.sizes.all()
             ],
             # New size-pricing records, including size-only products.
