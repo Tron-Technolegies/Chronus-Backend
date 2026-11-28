@@ -1,22 +1,33 @@
+
 import base64
 import uuid
+import logging
 import requests
 
+from decimal import Decimal
 from django.conf import settings
 from django.utils import timezone
-from datetime import datetime
-import requests
+
+
+logger = logging.getLogger(__name__)
+
 
 class DHLService:
 
     def __init__(self):
-
-        self.base_url = settings.DHL_BASE_URL
+        self.base_url = settings.DHL_BASE_URL.rstrip("/")
         self.username = settings.DHL_API_KEY
         self.password = settings.DHL_API_SECRET
         self.account_number = settings.DHL_ACCOUNT_NUMBER
 
+    # --------------------------------------------------
+    # AUTHENTICATION HEADERS
+    # --------------------------------------------------
+
     def get_headers(self):
+
+        if not self.username or not self.password:
+            raise ValueError("DHL API credentials are missing.")
 
         credentials = f"{self.username}:{self.password}"
 
@@ -25,74 +36,194 @@ class DHLService:
         ).decode()
 
         return {
-
             "Authorization": f"Basic {encoded}",
-
             "Content-Type": "application/json",
-
             "Message-Reference": str(uuid.uuid4()),
-
             "Message-Reference-Date": timezone.now().strftime(
                 "%Y-%m-%dT%H:%M:%SGMT+00:00"
             )
         }
 
+    # --------------------------------------------------
+    # PRODUCT WEIGHT CALCULATION
+    # --------------------------------------------------
+
     def calculate_weight(self, order):
 
-        total_weight = 0
+        total_weight = Decimal("0.00")
 
-        for item in order.items.select_related(
-            "product"
-        ).all():
+        items = order.items.select_related("product").all()
 
-            total_weight += (
-                float(item.product.weight)
-                * item.quantity
-            )
+        if not items.exists():
+            raise ValueError("Order has no items.")
 
-        return round(total_weight, 2)
+        for item in items:
 
-    def calculate_dimensions(self, order):
-
-        length = 0
-        width = 0
-        height = 0
-
-        for item in order.items.select_related(
-            "product"
-        ).all():
+            if not item.product:
+                raise ValueError(
+                    f"Product is missing for order item {item.id}."
+                )
 
             product = item.product
 
-            length = max(
-                length,
-                float(product.length)
-            )
+            weight = product.weight or Decimal("0.00")
 
-            width = max(
-                width,
-                float(product.width)
-            )
+            if weight <= 0:
+                raise ValueError(
+                    f"Invalid weight for product: {product.name}"
+                )
 
-            height += (
-                float(product.height)
-                * item.quantity
-            )
+            if item.quantity <= 0:
+                raise ValueError(
+                    f"Invalid quantity for product: {product.name}"
+                )
+
+            total_weight += weight * item.quantity
+
+        return total_weight.quantize(Decimal("0.01"))
+
+    # --------------------------------------------------
+    # PRODUCT DIMENSION CALCULATION
+    # --------------------------------------------------
+
+    def calculate_dimensions(self, order):
+
+        length = Decimal("0.00")
+        width = Decimal("0.00")
+        height = Decimal("0.00")
+
+        items = order.items.select_related("product").all()
+
+        if not items.exists():
+            raise ValueError("Order has no items.")
+
+        for item in items:
+
+            if not item.product:
+                raise ValueError(
+                    f"Product is missing for order item {item.id}."
+                )
+
+            product = item.product
+
+            product_length = product.length
+            product_width = product.width
+            product_height = product.height
+
+            if not all([
+                product_length > 0,
+                product_width > 0,
+                product_height > 0
+            ]):
+                raise ValueError(
+                    f"Invalid dimensions for product: {product.name}"
+                )
+
+            length = max(length, product_length)
+            width = max(width, product_width)
+
+            height += product_height * item.quantity
 
         return {
-
-            "length": round(length, 2),
-
-            "width": round(width, 2),
-
-            "height": round(height, 2)
+            "length": length.quantize(Decimal("0.01")),
+            "width": width.quantize(Decimal("0.01")),
+            "height": height.quantize(Decimal("0.01"))
         }
 
-    def build_payload(self, order):
+    # --------------------------------------------------
+    # SHIPMENT DATA VALIDATION
+    # --------------------------------------------------
 
+    def validate_shipment_data(self, order):
+
+        # Validate receiver details
+        required_fields = {
+            "receiver name": order.receiver_name,
+            "address": order.address_line_1,
+            "city": order.city,
+            "postal code": order.postal_code,
+            "country": order.country,
+            "phone": order.phone,
+            "email": order.email,
+        }
+
+        for field, value in required_fields.items():
+
+            if not value or not str(value).strip():
+                raise ValueError(
+                    f"Missing required receiver {field}."
+                )
+
+        # Validate receiver country code
+        country_code = order.country.strip()
+
+        if (
+            len(country_code) != 2
+            or not country_code.isalpha()
+        ):
+            raise ValueError(
+                "Receiver country must be a valid ISO 2-letter country code."
+            )
+
+        # Validate shipper configuration
+        shipper_fields = {
+            "DHL account number": self.account_number,
+            "DHL API username": self.username,
+            "DHL API password": self.password,
+            "shipper address": settings.DHL_SHIPPER_ADDRESS,
+            "shipper city": settings.DHL_SHIPPER_CITY,
+            "shipper postal code": settings.DHL_SHIPPER_POSTAL_CODE,
+            "shipper country": settings.DHL_SHIPPER_COUNTRY,
+            "shipper name": settings.DHL_SHIPPER_NAME,
+            "shipper phone": settings.DHL_SHIPPER_PHONE,
+        }
+
+        for field, value in shipper_fields.items():
+
+            if not value or not str(value).strip():
+                raise ValueError(
+                    f"Missing DHL configuration: {field}."
+                )
+
+        shipper_country = settings.DHL_SHIPPER_COUNTRY.strip()
+
+        if (
+            len(shipper_country) != 2
+            or not shipper_country.isalpha()
+        ):
+            raise ValueError(
+                "DHL shipper country must be a valid ISO 2-letter code."
+            )
+
+        if not self.base_url:
+            raise ValueError("DHL base URL is missing.")
+
+        # Validate package weight and dimensions
         weight = self.calculate_weight(order)
 
         dimensions = self.calculate_dimensions(order)
+
+        if weight <= 0:
+            raise ValueError(
+                "Shipment weight must be greater than zero."
+            )
+
+        for dimension, value in dimensions.items():
+
+            if value <= 0:
+                raise ValueError(
+                    f"Shipment {dimension} must be greater than zero."
+                )
+
+        return weight, dimensions
+
+    # --------------------------------------------------
+    # BUILD SHIPMENT PAYLOAD
+    # --------------------------------------------------
+
+    def build_payload(self, order):
+
+        weight, dimensions = self.validate_shipment_data(order)
 
         payload = {
 
@@ -108,15 +239,10 @@ class DHLService:
             "productCode": "D",
 
             "accounts": [
-
                 {
-
                     "typeCode": "shipper",
-
                     "number": self.account_number.strip()
-
                 }
-
             ],
 
             "customerDetails": {
@@ -135,7 +261,7 @@ class DHLService:
                             settings.DHL_SHIPPER_POSTAL_CODE,
 
                         "countryCode":
-                            settings.DHL_SHIPPER_COUNTRY
+                            settings.DHL_SHIPPER_COUNTRY.strip().upper()
 
                     },
 
@@ -162,11 +288,7 @@ class DHLService:
                             order.address_line_1,
 
                         "addressLine2":
-                            (
-                                order.address_line_2
-                                if order.address_line_2
-                                else order.address_line_1
-                            ),
+                            order.address_line_2,
 
                         "cityName":
                             order.city,
@@ -175,7 +297,7 @@ class DHLService:
                             order.postal_code,
 
                         "countryCode":
-                            order.country
+                            order.country.strip().upper()
 
                     },
 
@@ -202,23 +324,15 @@ class DHLService:
             "content": {
 
                 "packages": [
-
                     {
-
-                        "weight": weight,
+                        "weight": float(weight),
 
                         "dimensions": {
-
-                            "length": dimensions["length"],
-
-                            "width": dimensions["width"],
-
-                            "height": dimensions["height"]
-
+                            "length": float(dimensions["length"]),
+                            "width": float(dimensions["width"]),
+                            "height": float(dimensions["height"])
                         }
-
                     }
-
                 ],
 
                 "description":
@@ -235,100 +349,142 @@ class DHLService:
 
         return payload
 
+    # --------------------------------------------------
+    # CREATE DHL SHIPMENT
+    # --------------------------------------------------
+
     def create_shipment(self, order):
 
         url = f"{self.base_url}/shipments"
 
         payload = self.build_payload(order)
 
-        print("=" * 80)
-        print("DHL REQUEST URL")
-        print(url)
-
-        print("=" * 80)
-        print("DHL REQUEST PAYLOAD")
-        print(payload)
-
         try:
 
             response = requests.post(
-
                 url,
-
                 json=payload,
-
                 headers=self.get_headers(),
-
                 timeout=60
-
             )
-
-            print("=" * 80)
-            print("DHL STATUS CODE")
-            print(response.status_code)
-
-            print("=" * 80)
-            print("DHL RESPONSE")
-            print(response.text)
 
             response.raise_for_status()
 
             return response.json()
 
-        except requests.exceptions.HTTPError:
+        except requests.exceptions.HTTPError as e:
 
-            print("=" * 80)
-            print("DHL ERROR RESPONSE")
-            print(response.text)
+            logger.error(
+                "DHL shipment API returned HTTP %s.",
+                response.status_code
+            )
 
-            raise Exception(response.text)
+            # Keep the DHL error response available for debugging.
+            raise Exception(
+                f"DHL shipment creation failed: {response.text}"
+            ) from e
 
         except requests.exceptions.RequestException as e:
 
-            raise Exception(str(e))
-        
-    
+            logger.exception("DHL shipment API request failed.")
+
+            raise Exception(
+                f"DHL connection error: {str(e)}"
+            ) from e
+
+    # --------------------------------------------------
+    # GET AVAILABLE DHL PRODUCTS
+    # --------------------------------------------------
+
     def get_available_products(self, order):
 
         weight = self.calculate_weight(order)
+
         dimensions = self.calculate_dimensions(order)
+
+        if not settings.DHL_SHIPPER_COUNTRY:
+            raise ValueError("DHL shipper country is missing.")
+
+        if not settings.DHL_SHIPPER_CITY:
+            raise ValueError("DHL shipper city is missing.")
+
+        if not order.country or not order.city:
+            raise ValueError(
+                "Destination country and city are required."
+            )
 
         url = f"{self.base_url}/products"
 
         params = {
-            "accountNumber": self.account_number.strip(),
-            "originCountryCode": "AE",
-            "originCityName": "Dubai",
-            "destinationCountryCode": order.country,
-            "destinationCityName": order.city,
-            "weight": weight,
-            "length": dimensions["length"],
-            "width": dimensions["width"],
-            "height": dimensions["height"],
-            "plannedShippingDate": datetime.utcnow().strftime("%Y-%m-%d"),
-            "isCustomsDeclarable": "false",
-            "unitOfMeasurement": "metric"
+
+            "accountNumber":
+                self.account_number.strip(),
+
+            "originCountryCode":
+                settings.DHL_SHIPPER_COUNTRY.strip().upper(),
+
+            "originCityName":
+                settings.DHL_SHIPPER_CITY,
+
+            "destinationCountryCode":
+                order.country.strip().upper(),
+
+            "destinationCityName":
+                order.city,
+
+            "weight":
+                float(weight),
+
+            "length":
+                float(dimensions["length"]),
+
+            "width":
+                float(dimensions["width"]),
+
+            "height":
+                float(dimensions["height"]),
+
+            "plannedShippingDate":
+                timezone.localdate().strftime("%Y-%m-%d"),
+
+            "isCustomsDeclarable":
+                "false",
+
+            "unitOfMeasurement":
+                "metric"
+
         }
 
-        response = requests.get(
-            url,
-            headers=self.get_headers(),
-            params=params,
-            timeout=60
-        )
+        try:
 
-        print("=" * 80)
-        print("PRODUCT API URL")
-        print(response.url)
+            response = requests.get(
+                url,
+                headers=self.get_headers(),
+                params=params,
+                timeout=60
+            )
 
-        print("=" * 80)
-        print("STATUS")
-        print(response.status_code)
+            response.raise_for_status()
 
-        print("=" * 80)
-        print("BODY")
-        print(response.text)
+            return response.json()
 
-        response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
 
-        return response.json()
+            logger.error(
+                "DHL products API returned HTTP %s.",
+                response.status_code
+            )
+
+            raise Exception(
+                f"DHL product availability failed: {response.text}"
+            ) from e
+
+        except requests.exceptions.RequestException as e:
+
+            logger.exception(
+                "DHL products API request failed."
+            )
+
+            raise Exception(
+                f"DHL connection error: {str(e)}"
+            ) from e
