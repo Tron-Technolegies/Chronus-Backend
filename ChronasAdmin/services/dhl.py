@@ -279,27 +279,39 @@ class DHLService:
                     }
 
                 },
-
                 "receiverDetails": {
+                "postalAddress": {
+                    "addressLine1": order.address_line_1,
+                    "addressLine2": (
+                        order.address_line_2.strip()
+                        if order.address_line_2 and order.address_line_2.strip()
+                        else order.address_line_1.strip()
+                    ),
+                    "cityName": order.city,
+                    "postalCode": order.postal_code,
+                    "countryCode": order.country.upper()
+                },
 
-                    "postalAddress": {
+                # "receiverDetails": {
 
-                        "addressLine1":
-                            order.address_line_1,
+                #     "postalAddress": {
 
-                        "addressLine2":
-                            order.address_line_2,
+                #         "addressLine1":
+                #             order.address_line_1,
 
-                        "cityName":
-                            order.city,
+                #         "addressLine2":
+                #             order.address_line_2,
 
-                        "postalCode":
-                            order.postal_code,
+                #         "cityName":
+                #             order.city,
 
-                        "countryCode":
-                            order.country.strip().upper()
+                #         "postalCode":
+                #             order.postal_code,
 
-                    },
+                #         "countryCode":
+                #             order.country.strip().upper()
+
+                #     },
 
                     "contactInformation": {
 
